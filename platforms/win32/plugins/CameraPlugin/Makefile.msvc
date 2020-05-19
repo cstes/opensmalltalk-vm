@@ -7,9 +7,6 @@
 # Further it must be built using the MSVC++ toolchain because of lack of COM
 # support in the mingw toolchain.
 
-DL:=/DEFAULTLIB:
-NDL:=/NODEFAULTLIB:
-
 EXTRALIBS:=strmbase.lib strmiids.lib
 
 include ../common/Makefile.msvc.plugin
