@@ -880,7 +880,7 @@ static void outOfMemory(void)
 static void *printRegisterState(ucontext_t *uap);
 
 static void
-reportStackState(char *msg, char *date, int printAll, ucontext_t *uap)
+reportStackState(const char *msg, char *date, int printAll, ucontext_t *uap)
 {
 #if !defined(NOEXECINFO) && defined(HAVE_EXECINFO_H)
 	void *addrs[BACKTRACE_DEPTH];
@@ -1064,7 +1064,7 @@ block()
 /* Disable Intel compiler inlining of error which is used for breakpoints */
 #pragma auto_inline(off)
 void
-error(char *msg)
+error(const char *msg)
 {
 	reportStackState(msg,0,0,0);
 	if (blockOnError) block();
@@ -1112,13 +1112,13 @@ sigsegv(int sig, siginfo_t *info, ucontext_t *uap)
 	time_t now = time(NULL);
 	char ctimebuf[32];
 	char crashdump[MAXPATHLEN+1];
-	char *fault = sig == SIGSEGV
-					? "Segmentation fault"
-					: (sig == SIGBUS
-						? "Bus error"
-						: (sig == SIGILL
-							? "Illegal instruction"
-							: "Unknown signal"));
+	const char *fault = sig == SIGSEGV
+						? "Segmentation fault"
+						: (sig == SIGBUS
+							? "Bus error"
+							: (sig == SIGILL
+								? "Illegal instruction"
+								: "Unknown signal"));
 
 	if (!inFault) {
 		extern sqInt primitiveFailForFFIExceptionat(usqLong exceptionCode, usqInt pc);
@@ -1166,25 +1166,25 @@ struct moduleDescription
 
 static struct moduleDescription moduleDescriptions[]=
 {
-  { &displayModule, "display", "X11"    },	/*** NO DEFAULT ***/
-  { &displayModule, "display", "fbdev"  },	/*** NO DEFAULT ***/
-  { &displayModule, "display", "null"   },	/*** NO DEFAULT ***/
+  { &displayModule, "display", "X11"    },      /*** Implicit   ***/
   { &displayModule, "display", "custom" },	/*** NO DEFAULT ***/
-  { &soundModule,   "sound",   "NAS"    },	/*** NO DEFAULT ***/
+  { &soundModule,   "sound",   "NAS"    },	/*** Implicit   ***/
   { &soundModule,   "sound",   "custom" },	/*** NO DEFAULT ***/
-  { &soundModule,   "sound",   "sndio"  },	/*** NO DEFAULT ***/
   /* when adding an entry above be sure to change the defaultModules offset below */
   { &displayModule, "display", "Quartz" },	/* defaults... */
+  { &displayModule, "display", "fbdev"  },
+  { &displayModule, "display", "null"   },
+  { &soundModule,   "sound",   "pulse"  },
   { &soundModule,   "sound",   "OSS"    },
   { &soundModule,   "sound",   "MacOSX" },
   { &soundModule,   "sound",   "Sun"    },
-  { &soundModule,   "sound",   "pulse"  },
   { &soundModule,   "sound",   "ALSA"   },
+  { &soundModule,   "sound",   "sndio"  },
   { &soundModule,   "sound",   "null"   },
   { 0,              0,         0	}
 };
 
-static struct moduleDescription *defaultModules= moduleDescriptions + 7;
+static struct moduleDescription *defaultModules= moduleDescriptions + 4;
 
 
 struct SqModule *queryLoadModule(char *type, char *name, int query)
