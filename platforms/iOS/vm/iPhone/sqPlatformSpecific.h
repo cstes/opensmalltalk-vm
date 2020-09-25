@@ -19,6 +19,10 @@
    
    Define plugin for Netscape Plugin building, needed for CodeWarrior
 */
+
+#ifndef _SQ_PLATFORM_SPECIFIC_H
+#define _SQ_PLATFORM_SPECIFIC_H
+
 /*
  Copyright (c) 2000-2008 Corporate Smalltalk Consulting Ltd. All rights reserved.
  MIT License
@@ -83,13 +87,13 @@ extern usqInt sqAllocateMemory(usqInt minHeapSize, usqInt desiredHeapSize);
 sqAllocateMemory(minimumMemory, heapSize)
 # define sqMacMemoryFree() 
 #else
-usqInt sqAllocateMemoryMac(usqInt desiredHeapSize,sqInt minHeapSize, FILE * f,usqInt headersize);
-#define allocateMemoryMinimumImageFileHeaderSize(heapSize, minimumMemory, fileStream, headerSize) \
+usqInt sqAllocateMemoryMac(usqInt,sqInt,void *,usqInt);
+# define allocateMemoryMinimumImageFileHeaderSize(heapSize, minimumMemory, fileStream, headerSize) \
 sqAllocateMemoryMac(heapSize, minimumMemory, fileStream, headerSize)
 #endif
 
 #ifdef BUILD_FOR_OSX
-size_t sqImageFileReadEntireImage(void *ptr, size_t elementSize, size_t count, FILE * f);
+size_t sqImageFileReadEntireImage(void *, size_t, size_t, void *);
 #define sqImageFileReadEntireImage(memoryAddress, elementSize,  length, fileStream) \
 sqImageFileReadEntireImage(memoryAddress, elementSize, length, fileStream)
 #else
@@ -179,4 +183,4 @@ extern const pthread_key_t tltiIndex;
 
 #endif /* macintoshSqueak */
 
-
+#endif /* _SQ_PLATFORM_SPECIFIC_H */
