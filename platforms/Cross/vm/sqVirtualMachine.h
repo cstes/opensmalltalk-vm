@@ -109,7 +109,7 @@ typedef struct VirtualMachine {
  * 'fetchLong32OfObject'                                           */
 	sqInt  (*obsoleteDontUseThisFetchWordofObject)(sqInt fieldFieldIndex, sqInt oop);
 #else /* since there is no legacy plugin problem back to 3.8 we repurpose... */
-	void   (*error)(char *);
+	void   (*error)(const char *);
 #endif
 	void  *(*firstFixedField)(sqInt oop);
 	void  *(*firstIndexableField)(sqInt oop);
@@ -400,6 +400,7 @@ typedef struct VirtualMachine {
   sqInt (*isLong64s)(sqInt oop);
   sqInt (*identityHashOf)(sqInt oop);
   sqInt (*isWordsOrShorts)(sqInt oop); /* for SoundPlugin et al */
+  sqInt (*bytesPerElement)(sqInt oop); /* for SocketPugin et al */
 #endif
 } VirtualMachine;
 
