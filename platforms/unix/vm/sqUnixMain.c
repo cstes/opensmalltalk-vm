@@ -36,6 +36,7 @@
 #include "sq.h"
 #include "sqAssert.h"
 #include "sqMemoryAccess.h"
+#include "sqImageFileAccess.h"
 #include "sqaio.h"
 #include "sqUnixCharConv.h"
 #include "sqSCCSVersion.h"
@@ -1976,13 +1977,13 @@ void imgInit(void)
 	  dpy->winImageNotFound();
 	  imageNotFound(shortImageName);
 	}
-      {
-	int fd= open(imageName, O_RDONLY);
+
+	int fd = fileno(f);
 	if (fd < 0) abort();
 #      ifdef DEBUG_IMAGE
 	printf("fstat(%d) => %d\n", fd, fstat(fd, &sb));
 #      endif
-      }
+
       recordFullPathForImageName(shortImageName); /* full image path */
       if (extraMemory)
 	useMmap= 0;
@@ -1992,12 +1993,12 @@ void imgInit(void)
       printf("image size %ld + heap size %ld (useMmap = %d)\n", (long)sb.st_size, extraMemory, useMmap);
 #    endif
 #if SPURVM
-	  readImageFromFileHeapSizeStartingAt(f, 0, 0);
+	  readImageFromFileHeapSizeStartingAt(fd, 0, 0);
 #else
       extraMemory += (long)sb.st_size;
-      readImageFromFileHeapSizeStartingAt(f, extraMemory, 0);
+      readImageFromFileHeapSizeStartingAt(fd, extraMemory, 0);
 #endif
-      sqImageFileClose(f);
+      sqImageFileClose(fd);
       break;
     }
 }

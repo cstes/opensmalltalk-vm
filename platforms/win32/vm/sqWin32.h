@@ -71,7 +71,6 @@
   /* The hardcoded defs:
    * No virtual memory support; no service support; no preferences; no printing
    */
-#	define NO_VIRTUAL_MEMORY
 #	define NO_SERVICE
 #	define NO_PREFERENCES
 #	define NO_PRINTER
@@ -82,8 +81,6 @@
 #	define NO_JOYSTICK
 #	define NO_MIDI
 #	define NO_ASYNC_FILES
-  /* Do not rely on stdio functions but rather pure Win32 stuff */
-#	define WIN32_FILE_SUPPORT
   /* Take out the static strings */
 #	define NO_WARNINGS
 #endif /* MINIMAL */

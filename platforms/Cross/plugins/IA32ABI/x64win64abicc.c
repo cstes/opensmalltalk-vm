@@ -11,7 +11,7 @@
 #if defined(x86_64) || defined(__amd64) || defined(__x86_64) || defined(__amd64__) || defined(__x86_64__) || defined(_M_AMD64) || defined(_M_X64)
 
 #if defined(_MSC_VER) || defined(__MINGW32__)
-# include "windows.h" /* for GetSystemInfo & VirtualAlloc */
+# include <Windows.h> /* for GetSystemInfo & VirtualAlloc */
 #else
 # error Non windows should use the SystemV ABI, not the win64 ABI
 #endif
@@ -197,7 +197,6 @@ thunkEntry(long long rcx, long long rdx,
 			void *thunkp, sqIntptr_t *stackp)
 {
 	VMCallbackContext vmcc;
-	VMCallbackContext *previousCallbackContext;
 	int returnType;
 	long long flags;
 	long long intargs[4];
@@ -217,7 +216,7 @@ extern void saveFloatRegsWin64(long long xmm0,long long xmm1,long long xmm2, lon
 	}
 
 	if (!(returnType = _setjmp(vmcc.trampoline))) {
-		previousCallbackContext = getMRCC();
+		vmcc.savedMostRecentCallbackContext = getMRCC();
 		setMRCC(&vmcc);
 		vmcc.thunkp = thunkp;
 		vmcc.stackp = stackp + 2; /* skip address of retpc & retpc (thunk) */
@@ -225,11 +224,12 @@ extern void saveFloatRegsWin64(long long xmm0,long long xmm1,long long xmm2, lon
 		vmcc.floatregargsp = fpargs;
 		interpreterProxy->sendInvokeCallbackContext(&vmcc);
 		fprintf(stderr,"Warning; callback failed to invoke\n");
-		setMRCC(previousCallbackContext);
+		setMRCC(vmcc.savedMostRecentCallbackContext);
 		interpreterProxy->disownVM(flags);
 		return -1;
 	}
-	setMRCC(previousCallbackContext);
+
+	setMRCC(vmcc.savedMostRecentCallbackContext);
 	interpreterProxy->disownVM(flags);
 
 	switch (returnType) {
