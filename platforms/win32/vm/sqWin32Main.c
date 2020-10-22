@@ -21,6 +21,7 @@
 #include <float.h>
 #include <ole2.h>
 #include "sq.h"
+#include "sqImageFileAccess.h"
 #include "sqWin32Prefs.h"
 #include "sqAssert.h"
 #include "sqWin32Backtrace.h"
@@ -92,7 +93,7 @@
 /*** Crash debug -- Imported from Virtual Machine ***/
 int getFullScreenFlag(void);
 sqInt methodPrimitiveIndex(void);
-int getCurrentBytecode(void);
+sqInt getCurrentBytecode(void);
 
 extern void printPhaseTime(int);
 
@@ -187,12 +188,8 @@ extern sqInt primitiveFailForFFIExceptionat(usqLong exceptionCode, usqInt pc);
   DWORD result;
 
   /* #1: Try to handle exception in the regular (memory access)
-     exception filter if virtual memory support is enabled */
-#ifndef NO_VIRTUAL_MEMORY
+     exception filter */
   result = sqExceptionFilter(exp);
-#else
-  result = EXCEPTION_CONTINUE_SEARCH;
-#endif
 
   /* #2: If that didn't work, try to handle any FP problems */
   if (result != EXCEPTION_CONTINUE_EXECUTION) {
@@ -1615,25 +1612,19 @@ sqMain(int argc, char *argv[])
   /* initialisation */
   SetupWindows();
   SetupPixmaps();
-  { extern void ioInitTime(void);
-	extern void ioInitThreads(void);
-	ioInitTime();
-	ioInitThreads();
+  ioInitTime();
+  ioInitThreads();
 # if !COGMTVM
-	/* Set the current VM thread.  If the main thread isn't the VM thread then
-	 * when that thread is spawned it can reassign ioVMThread.
-	 */
-	ioVMThread = ioCurrentOSThread();
+  /* Set the current VM thread.  If the main thread isn't the VM thread then
+   * when that thread is spawned it can reassign ioVMThread.
+   */
+  ioVMThread = ioCurrentOSThread();
 # endif
-  }
 
   /* check the interpreter's size assumptions for basic data types */
   if (sizeof(int) != 4) error("This C compiler's integers are not 32 bits.");
   if (sizeof(sqLong) != 8) error("This C compiler's long longs are not 64 bits.");
   if (sizeof(double) != 8) error("This C compiler's floats are not 64 bits.");
-#if 0
-  if (sizeof(time_t) != 4) error("This C compiler's time_t's are not 32 bits.");
-#endif
 
 
   if(!imageFile) {
@@ -1644,17 +1635,8 @@ sqMain(int argc, char *argv[])
   /* allocate this before anything is going to happen */
   vmWakeUpEvent = CreateEvent(NULL, 1, 0, NULL);
 
-#ifdef NO_VIRTUAL_MEMORY
-  if(!dwMemorySize) {
-    dwMemorySize = 4;
-    virtualMemory = (int)imageSize + max(imageSize, dwMemorySize * 0x00100000);
-  } else {
-    virtualMemory = (int)dwMemorySize * 0x00100000;
-  }
-#else
   /* initial commit size = imageSize + 4MB */
   virtualMemory = imageSize + 0x00400000;
-#endif
 
 #if !NO_FIRST_LEVEL_EXCEPTION_HANDLER
 # ifndef _MSC_VER
@@ -2207,22 +2189,20 @@ parseGenericArgs(int argc, char *argv[])
 			return imageName != 0;
 		}
 
-	if (*imageName == 0) { /* only try to use image name if none is provided */
-		if (*argv[0] && IsImage(argv[0])) {
-			strncpy(imageName, argv[0],MAX_PATH_UTF8);
-			MultiByteToWideChar(CP_UTF8, 0, imageName, -1, imageNameW, MAX_PATH);
-			/* if provided, the image is a vm argument. */
-			vmOptions[numOptionsVM++] = argv[0];
-		}
+	/* Always allow the command-line to override an implicit image name. */
+	if (*argv[0] && IsImage(argv[0])) {
+		strncpy(imageName, argv[0], MAX_PATH_UTF8);
+		MultiByteToWideChar(CP_UTF8, 0, imageName, -1, imageNameW, MAX_PATH);
+		/* if provided, the image is a vm argument. */
+		vmOptions[numOptionsVM++] = argv[0];
 	}
-	else /* provide image name as second argument if implicitly specified */
+	else if (*imageName) /* provide image name as second argument if implicitly specified */
 		imageOptions[numOptionsImage++] = imageName;
 
-	imageOptions[numOptionsImage++] = argv[0];
-	for (i = 1; i < argc; i++)
+	for (i = 0; i < argc; i++)
 		imageOptions[numOptionsImage++] = argv[i];
 
-  return 1;
+	return 1;
 }
 
 static int
