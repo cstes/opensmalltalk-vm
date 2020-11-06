@@ -36,6 +36,7 @@
 #undef sqShrinkMemoryBy
 #undef sqMemoryExtraBytesLeft
 
+#include <stdio.h>
 #include "sqMemoryAccess.h"
 
 extern usqInt sqAllocateMemory(usqInt minHeapSize, usqInt desiredHeapSize);
@@ -105,8 +106,6 @@ extern void sqFilenameFromString(char *uxName, sqInt stNameIndex, int sqNameLeng
 #undef	sqFTruncate
 /* sqFTruncate should return 0 on success, ftruncate does also */
 #define	sqFTruncate(f,o) ftruncate(fileno(f), o)
-#define ftell(s) ftello(s)
-#define fseek(s,o,w) fseeko(s,o,w)
 
 #if defined(__GNUC__)
 # if !defined(VM_LABEL)
