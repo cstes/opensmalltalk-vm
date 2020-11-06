@@ -2,6 +2,8 @@
 cmake_minimum_required(VERSION 2.8)
 cmake_policy(SET CMP0054 NEW)
 project(OpenSmalltalkVM)
+#for setjmp.asm
+enable_language(ASM-ATT)
 
 option(ONLY_CONFIG_H "Only generate config.h" OFF)
 option(SPUR_OBJECT_MODEL "Spur Object Model" ON)
@@ -624,6 +626,12 @@ elseif(WIN32)
 		platforms/minheadless/windows
 	)
 
+	if(SQUEAK_PLATFORM_X86_32)
+		set(SETJMP_IMPL platforms/win32/misc/_setjmp-x86.asm)
+	else()
+		set(SETJMP_IMPL platforms/win32/misc/_setjmp-x64.asm)
+	endif()
+
 	set(VM_PLATFORM_SOURCES
     	platforms/minheadless/windows/sqWin32Alloc.h
         platforms/minheadless/windows/sqWin32HandleTable.h
@@ -639,6 +647,7 @@ elseif(WIN32)
     	platforms/minheadless/windows/sqWin32Stubs.c
     	platforms/minheadless/windows/sqWin32Threads.c
     	platforms/minheadless/windows/sqWin32Time.c
+		${SETJMP_IMPL}
 		${VM_PLATFORM_SOURCES}
 	)
     add_definitions(
