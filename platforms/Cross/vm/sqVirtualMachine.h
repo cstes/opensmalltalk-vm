@@ -336,9 +336,6 @@ typedef struct VirtualMachine {
 #endif
 
 #if VM_PROXY_MINOR > 10
-# if !SPURVM
-#	define DisownVMLockOutFullGC 1
-# endif
   sqInt	(*disownVM)(sqInt flags);
   sqInt	(*ownVM)   (sqInt threadIdAndFlags);
   void  (*addHighPriorityTickee)(void (*ticker)(void), unsigned periodms);
@@ -395,12 +392,13 @@ typedef struct VirtualMachine {
   sqInt (*classFloat32Array)(void);
   sqInt (*classFloat64Array)(void);
 #endif
-#if VM_PROXY_MINOR > 16 /* Spur isShorts and isLong64s testing support, hash */
+#if VM_PROXY_MINOR > 16 /* Spur isShorts, isLong64s testing, hash etc */
   sqInt (*isShorts)(sqInt oop);
   sqInt (*isLong64s)(sqInt oop);
   sqInt (*identityHashOf)(sqInt oop);
-  sqInt (*isWordsOrShorts)(sqInt oop); /* for SoundPlugin et al */
-  sqInt (*bytesPerElement)(sqInt oop); /* for SocketPugin et al */
+  sqInt (*isWordsOrShorts)(sqInt oop);	/* for SoundPlugin et al */
+  sqInt (*bytesPerElement)(sqInt oop);	/* for SocketPugin et al */
+  sqInt (*fileTimesInUTC)(void);		/* for FilePlugin et al */
 #endif
 } VirtualMachine;
 
