@@ -6,14 +6,20 @@
  */
 #include "interp.h"
 
+#if 0
+#include "sqPlatformSpecific.h" // for EXPORT()
+
 #pragma auto_inline(off)
-#if defined(EXPORT) && !defined(SQUEAK_BUILTIN_PLUGIN)
+#if defined(IMPORT) && defined(SQUEAK_EXTERNAL_PLUGIN)
+IMPORT(void) error(const char *);
+#elif defined(EXPORT) && !defined(SQUEAK_BUILTIN_PLUGIN)
 EXPORT(void) error(const char *);
 #else
 extern void error(const char *);
 #endif
-
 #pragma auto_inline(on)
+#endif
+
 #if SPURVM
 # define VM_VERSION "5.0"
 #else
@@ -174,7 +180,7 @@ typedef struct VirtualMachine {
 
 	/* InterpreterProxy methodsFor: 'instance creation' */
 
-	sqInt (*clone)(sqInt oop);
+	sqInt (*cloneObject)(sqInt oop);
 	sqInt (*instantiateClassindexableSize)(sqInt classPointer, sqInt size);
 	sqInt (*makePointwithxValueyValue)(sqInt xValue, sqInt yValue);
 	sqInt (*popRemappableOop)(void);
@@ -239,7 +245,7 @@ typedef struct VirtualMachine {
 #if VM_PROXY_MINOR > 3
 
 	void *(*ioLoadFunctionFrom)(char *fnName, char *modName);
-	sqInt (*ioMicroMSecs)(void);
+	unsigned int (*ioMicroMSecs)(void);
 
 #endif
 
@@ -524,7 +530,7 @@ sqInt classString(void);
 
 
 /* InterpreterProxy methodsFor: 'instance creation' */
-sqInt clone(sqInt oop);
+sqInt cloneObject(sqInt oop);
 sqInt instantiateClassindexableSize(sqInt classPointer, sqInt size);
 sqInt makePointwithxValueyValue(sqInt xValue, sqInt yValue);
 sqInt popRemappableOop(void);
@@ -544,7 +550,7 @@ sqInt showDisplayBitsLeftTopRightBottom(sqInt aForm, sqInt l, sqInt t, sqInt r, 
 sqInt signalSemaphoreWithIndex(sqInt semaIndex);
 sqInt success(sqInt aBoolean);
 sqInt superclassOf(sqInt classPointer);
-sqInt ioMicroMSecs(void);
+unsigned int ioMicroMSecs(void);
 unsigned long long  ioUTCMicroseconds(void);
 unsigned long long  ioUTCMicrosecondsNow(void);
 void forceInterruptCheck(void);
