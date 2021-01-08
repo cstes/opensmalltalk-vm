@@ -40,7 +40,9 @@ typedef unsigned __int64 squeakFileOffsetType;
 
 /* File positions in the FilePlugin */
 typedef unsigned __int64 squeakFileOffsetType;
-#define PATH_MAX _MAX_PATH
+#if !defined(PATH_MAX)
+# define PATH_MAX _MAX_PATH
+#endif
 
 /* pluggable primitive support */
 #if defined(_MSC_VER) || defined(__MINGW32__)
@@ -138,7 +140,7 @@ extern const unsigned long tltiIndex;
 #	define VM_LABEL(foo) asm("\n.globl L" #foo "\nL" #foo ":")
 # endif
 #endif
-#if !defined(VM_LABEL) || COGVM
+#if !defined(VM_LABEL) || COGVM || STACKVM
 # undef VM_LABEL
 # define VM_LABEL(foo) ((void)0)
 #endif

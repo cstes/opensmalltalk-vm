@@ -254,6 +254,13 @@ static char *getVersionInfo(int verbose);
 		return 1;
 	}
 #endif
+#if (STACKVM || NewspeakVM) && !COGVM
+	if ([argData isEqualToString: VMOPTIONOBJ("sendtrace")]) {
+		extern volatile int sendTrace;
+		sendTrace = 1;
+		return 1;
+	}
+#endif
 #if COGVM
 	if ([argData compare: VMOPTIONOBJ("trace") options: NSLiteralSearch range: NSMakeRange(0,VMOPTIONLEN(6))] == NSOrderedSame) {
 		extern int traceFlags;
@@ -361,6 +368,11 @@ static char *getVersionInfo(int verbose);
 		extern sqInt ffiExceptionResponse;
 		ffiExceptionResponse = -1;
 		return 1;
+	}
+	if ([argData isEqualToString: VMOPTIONOBJ("eventtrace")]) {
+		extern sqInt eventTraceMask;
+		eventTraceMask = atoi(peek);		 
+		return 2;
 	}
 #endif /* STACKVM */
 #if COGVM
@@ -520,6 +532,7 @@ static char *getVersionInfo(int verbose);
 	printf("  "VMOPTION("numextsems")" num       make the external semaphore table num in size\n");
 	printf("  "VMOPTION("noheartbeat")"          disable the heartbeat for VM debugging. disables input\n");
 	printf("  "VMOPTION("pollpip")" (0|1)        output on each poll for input\n");
+	printf("  "VMOPTION("eventtrace")" mask      print input events with types in mask to stderr\n");
 #endif
 #if STACKVM || NewspeakVM
 # if COGVM

@@ -49,10 +49,7 @@ extern void reportMinimumUnusedHeadroom(void);
 /* Thread support for thread-safe signalSemaphoreWithIndex and/or the COGMTVM */
 #if STACKVM || NewspeakVM
 # define sqLowLevelYield() sched_yield()
-/* linux's sched.h defines clone that conflicts with the interpreter's */
-# define clone NameSpacePollutant
 # include <pthread.h>
-# undef clone
 # define sqOSThread pthread_t
 /* these are used both in the STACKVM & the COGMTVM */
 # define ioOSThreadsEqual(a,b) pthread_equal(a,b)
@@ -116,7 +113,7 @@ extern void sqFilenameFromString(char *uxName, sqInt stNameIndex, int sqNameLeng
 # endif
 #endif
 
-#if !defined(VM_LABEL) || COGVM
+#if !defined(VM_LABEL) || COGVM || STACKVM
 # undef VM_LABEL
 # define VM_LABEL(foo) 0
 #endif
