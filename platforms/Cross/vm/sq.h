@@ -9,15 +9,16 @@
 #ifndef _SQ_H
 #define _SQ_H
 
-#include "sqConfig.h"
-
-#include <math.h>
-#include "sqMathShim.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <limits.h>
+
+#include "sqConfig.h"
+
+#include <math.h>
+#include "sqMathShim.h"
 
 #include "sqMemoryAccess.h"
 #include "sqVirtualMachine.h"
@@ -45,19 +46,6 @@
 #	define IMAGE_ENV_NAME "SQUEAK_IMAGE"
 # endif
 #endif
-
-/* Pluggable primitives macros. */
-
-/* Note: All pluggable primitives are defined as
-	EXPORT(int) somePrimitive(void)
-   All non-static variables in the VM and plugins are declared as
-	VM_EXPORT type var
-   If the platform requires special declaration modifiers, the EXPORT and
-   VM_EXPORT macros can be redefined.
-*/
-#define EXPORT(returnType) returnType
-#define VM_EXPORT
-#define VM_FUNCTION_EXPORT(returnType) returnType
 
 /* Platform-dependent millisecond clock macros. */
 
@@ -396,9 +384,11 @@ sqInt ioProcessEvents(void);
 #define EventKeyUp		2
 
 /* Button definitions. */
-#define RedButtonBit	4
-#define YellowButtonBit	2
-#define BlueButtonBit	1
+#define BlueButtonBit		 1
+#define YellowButtonBit		 2
+#define RedButtonBit		 4
+#define MoveRightButtonBit	 8
+#define MoveLeftButtonBit	16
 
 /* Modifier definitions. */
 #define ShiftKeyBit		1

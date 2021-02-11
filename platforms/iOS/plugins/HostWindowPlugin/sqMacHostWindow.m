@@ -385,7 +385,8 @@ ioPositionOfScreenWorkArea(sqIntptr_t windowIndex)
     NSScreen *screen = [[[NSApplication sharedApplication] mainWindow] screen];
     NSRect frame = [screen visibleFrame];
 	// 0@36 last we looked...
-	return packedDoubleXY(frame.origin.x,frame.origin.y);
+	return packedDoubleXY(frame.origin.x,
+						  yZero() - (frame.origin.y + frame.size.height));
 }
 
 /* Return the pixel extent of the platform-defined working area
@@ -396,6 +397,28 @@ ioSizeOfScreenWorkArea(sqIntptr_t windowIndex)
     NSScreen *screen = [[[NSApplication sharedApplication] mainWindow] screen];
     NSRect frame = [screen visibleFrame];
 	return packedDoubleXY(frame.size.width,frame.size.height);
+}
+
+/* Answer an Array of screen coordinates as pairs of packed points, origin,
+ * extent for each screen. So if there is one monitor the array has two entries.
+ */
+sqInt
+ioScreenRectangles(void)
+{
+	NSArray *screens = NSScreen.screens;
+	int n = [screens count];
+	sqInt a = instantiateClassindexableSize(classArray(),n * 2);
+
+	if (a)
+		for (int i = 0; i < n; i++) {
+			NSRect f = [screens[i] visibleFrame];
+			(void)storeIntegerofObjectwithValue
+					(i * 2, a, packedDoubleXY(f.origin.x,
+											  yZero() - (f.origin.y + f.size.height)));
+			(void)storeIntegerofObjectwithValue
+					(i * 2 + 1, a, packedDoubleXY(f.size.width,f.size.height));
+		}
+	return  a;
 }
 #endif // TerfVM
 

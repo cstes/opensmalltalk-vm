@@ -14,7 +14,6 @@
 #include <mmsystem.h>
 
 #include "sq.h"
-#undef EXPORT
 #include "sqAssert.h"
 #include "sqMemoryFence.h"
 
