@@ -17,7 +17,11 @@ $(info OBJDIR is $(OBJDIR))
 #
 
 # Not interested in recording system header dependencies.
-DEPFLAGS = -MMD -MF deps/$(*F).d
+ifeq ($(findstring /vm,$(OBJDIR)),/vm)
+DEPFLAGS:= -MMD -MT '$$(BUILD)/vm/$(*F).o' -MF deps/$(*F).d
+else
+DEPFLAGS:= -MMD -MT '$$(BUILD)/$(LIBNAME)/$(*F).o' -MF deps/$(*F).d
+endif
 ALLCFLAGS = $(DEPFLAGS) $(CFLAGS) $(INCLUDES) $(DEFS)
 ALLCXXFLAGS = $(DEPFLAGS) $(CXXFLAGS) $(INCLUDES) $(DEFS)
 
