@@ -239,7 +239,7 @@ yZero()
 		evt.utf32Code = unicode;
 
 		[self pushEventToQueue: (sqInputEvent *) &evt];
-
+		
 		if (i > 1 || !mainView.lastSeenKeyBoardStrokeDetails) {
 			evt.pressCode = EventKeyUp;
 			evt.charCode = keyCodeRemembered;
@@ -251,7 +251,7 @@ yZero()
 			[self pushEventToQueue: (sqInputEvent *) &evt];
 		}
 	}
-
+	
 	interpreterProxy->signalSemaphoreWithIndex(gDelegateApp.squeakApplication.inputSemaphoreIndex);
 }
 
@@ -292,8 +292,8 @@ yZero()
 
 	evt.type = EventTypeMouse;
 	evt.timeStamp = ioMSecs();
-
-	NSPoint local_point = [aView convertPoint: [theEvent locationInWindow] fromView:nil];
+	
+	NSPoint local_point = [aView sqMousePosition: theEvent];
 
 	evt.x =  lrintf((float)local_point.x);
 	evt.y =  lrintf((float)local_point.y);
@@ -319,7 +319,7 @@ yZero()
 	evt.type = EventTypeMouse;
 	evt.timeStamp = ioMSecs();
 
-	NSPoint local_point = [aView convertPoint: [theEvent locationInWindow] fromView:nil];
+	NSPoint local_point = [aView sqMousePosition: theEvent];
 
 	evt.x =  lrintf((float)local_point.x);
 	evt.y =  lrintf((float)local_point.y);
@@ -340,7 +340,7 @@ yZero()
 }
 
 - (void) recordWheelEvent:(NSEvent *) theEvent fromView: (NSView <sqSqueakOSXView> *) aView{
-
+		
 	[self recordMouseEvent: theEvent fromView: aView];
 	static float prevXDelta = 0;
 	static float prevYDelta = 0;
@@ -550,11 +550,11 @@ yZero()
 	return buttonState;
 }
 
-- (void) recordDragEvent:(int)dragType numberOfFiles:(int)numFiles where:(NSPoint)point windowIndex:(sqInt)windowIndex view:(NSView *)aView
+- (void) recordDragEvent:(int)dragType numberOfFiles:(int)numFiles where:(NSPoint)point windowIndex:(sqInt)windowIndex view:(NSView <sqSqueakOSXView> *)aView
 {
 	sqDragDropFilesEvent evt;
 
-    NSPoint local_point = [aView convertPoint:point fromView:nil];
+    NSPoint local_point = [aView sqDragPosition: point];
 
 	evt.type= EventTypeDragDropFiles;
 	evt.timeStamp= ioMSecs();
