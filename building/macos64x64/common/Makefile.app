@@ -48,6 +48,10 @@ else # default CONFIGURATION=product => $(APPNAMEDEF).app
 endif
 export APP
 
+# Allow default entitlements to be overridden by placing one in the make dir
+ENTITLEMENTS_FILE:=$(firstword $(wildcard entitlements.plist ../common/entitlements.plist))
+export ENTITLEMENTS_FILE
+
 default:	$(APP)
 
 include ../common/Makefile.vm
@@ -194,7 +198,10 @@ pathapp:
 #	$ security list-keychains -d user
 # Unlock using e.g.
 #	$ security unlock-keychain -p "<password>" "~/Library/Keychains/login.keychain-db"
-#
+# codesign can also crash (Killed: 9) if rebuilding an app that has been run.
+# The only work-around found so far is to delete the executable ($(VMEXE) or
+# app bundle and make.  Unsatisfactory...
+# N.B. plugin bundles are signed in Makefile.plugin
 ifeq ($(SIGNING_IDENTITY),)
 signapp:
 	echo "No signing identity found (SIGNING_IDENTITY unset). Not signing app."
@@ -202,15 +209,9 @@ else
 signapp:
 	rm -rf $(APP)/Contents/MacOS/*.cstemp
 	xattr -cr $(APP)
-	for bundle in $(APP)/Contents/Resources/*.bundle; do \
-		codesign --force --deep -s "$(SIGNING_IDENTITY)" \
-				--timestamp --options=runtime \
-				--entitlements ../common/entitlements.plist \
-				$$bundle; \
-	done
 	codesign --force --deep -s "$(SIGNING_IDENTITY)" \
 			--timestamp --options=runtime \
-			--entitlements ../common/entitlements.plist \
+			--entitlements $(ENTITLEMENTS_FILE) \
 			$(APP)
 endif
 
