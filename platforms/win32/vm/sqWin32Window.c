@@ -125,6 +125,7 @@ int keyBufOverflows = 0;	/* number of characters dropped */
 HWND stWindow = NULL;      /*	the squeak window */
 HINSTANCE hInstance;	     /*	the instance of squeak running */
 HCURSOR currentCursor=0;	 /*	current cursor displayed by squeak */
+BOOL    currentCursorIsIcon = 0;
 HPALETTE palette;	         /*	the palette (might be unused) */
 LOGPALETTE *logPal;	       /*	the logical palette definition */
 BITMAPINFO *bmi1;	         /*	1 bit depth bitmap info */
@@ -967,7 +968,8 @@ ioSetWindowWidthHeight(sqInt w, sqInt h)
 
 }
 
-void* ioGetWindowHandle(void) { return stWindow; }
+void *ioGetWindowHandle(void) { return stWindow; }
+__declspec(dllexport) void *getSTWindowHandle(void) { return stWindow; }
 
 sqInt
 ioIsWindowObscured(void)
@@ -1792,7 +1794,12 @@ static thisGetDpiForMonitor_t thisGetDpiForMonitor = NULL;
  */
 static double getDpiSystem(void)
 {
-  return (double) GetDeviceCaps(GetWindowDC(stWindow), LOGPIXELSY);
+  double dpi;
+  HDC dc = GetWindowDC(stWindow);
+  if (!dc) return 0.0; /* fail */
+  dpi = (double) GetDeviceCaps(dc, LOGPIXELSY);
+  ReleaseDC(stWindow,dc);
+  return dpi;
 }
 
 
@@ -1879,6 +1886,7 @@ ioScreenDepth(void)
 sqInt
 ioSetCursorWithMask(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX, sqInt offsetY)
 {
+  HCURSOR oldCursor;
   static unsigned char *andMask=0,*xorMask=0;
   static int cx=0,cy=0,cursorSize=0;
   int i;
@@ -1895,9 +1903,6 @@ ioSetCursorWithMask(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX,
       andMask = malloc(cursorSize);
       xorMask = malloc(cursorSize);
   }
-
-  /* free last used cursor */
-  if (currentCursor) DestroyCursor(currentCursor);
 
   memset(andMask,0xff,cursorSize);
   memset(xorMask,0x00,cursorSize);
@@ -1927,14 +1932,22 @@ ioSetCursorWithMask(sqInt cursorBitsIndex, sqInt cursorMaskIndex, sqInt offsetX,
         andMask[i*cx/8+1] = ~(checkedLongAt(cursorBitsIndex + (4 * i)) >> 16) & 0xFF;
       }
 
+  oldCursor = currentCursor;
   currentCursor = CreateCursor(hInstance,-offsetX,-offsetY,cx,cy,andMask,xorMask);
   if (currentCursor)
     {
       SetCursor(0);
       SetCursor(currentCursor);
+      /* free last used cursor */
+      if (oldCursor) {
+	if(currentCursorIsIcon) DestroyIcon(oldCursor);
+        else DestroyCursor(oldCursor);
+      }
+      currentCursorIsIcon = FALSE;
     }
   else
     {
+      currentCursor = oldCursor;
       printLastError(TEXT("CreateCursor failed"));
     }
 
@@ -1950,6 +1963,7 @@ ioSetCursor(sqInt cursorBitsIndex, sqInt offsetX, sqInt offsetY)
 sqInt
 ioSetCursorARGB(sqInt bitsIndex, sqInt w, sqInt h, sqInt x, sqInt y)
 {
+  HCURSOR oldCursor;
   ICONINFO info;
   HBITMAP hbmMask = NULL;
   HBITMAP hbmColor = NULL;
@@ -1975,13 +1989,27 @@ ioSetCursorARGB(sqInt bitsIndex, sqInt w, sqInt h, sqInt x, sqInt y)
   info.hbmMask = hbmMask;
   info.hbmColor = hbmColor;
 
-  DestroyCursor(currentCursor);
+  oldCursor = currentCursor;
   currentCursor = CreateIconIndirect(&info);
   if (hbmColor) DeleteObject(hbmColor);
   if (hbmMask) DeleteObject(hbmMask);
   if (mDC) DeleteDC(mDC);
 
-  SetCursor(currentCursor);
+  if (currentCursor)
+    {
+      SetCursor(currentCursor);
+      /* free last used cursor */
+      if (oldCursor) {
+	if(currentCursorIsIcon) DestroyIcon(oldCursor);
+        else DestroyCursor(oldCursor);
+      }
+      currentCursorIsIcon = TRUE;
+    }
+  else
+    {
+      currentCursor = oldCursor;
+      printLastError(TEXT("CreateIconIndirect failed"));
+    }
 
   return 1;
 }
@@ -2784,8 +2812,8 @@ extern char *osInfoString;
 extern char *gdInfoString;
 extern char *win32VersionName;
 
-char *
-GetAttributeString(sqInt id)
+const char *
+getAttributeString(sqInt id)
 {
 	/* This is a hook for getting various status strings back from
 	   the OS. In particular, it allows Squeak to be passed arguments
@@ -2811,31 +2839,24 @@ GetAttributeString(sqInt id)
     case 1004:
       return (char*) interpreterVersion;
     case 1005: /* window system name */
-	/* An attempt to eliminate one absurdity.  If this breaks too many things
-	 * we'll have to change it back.  But Win32 is not a good name.
-	 */
-#if 0
-      return "Win32";
-#else
       return "Windows";
-#endif
     case 1006: /* VM build ID */
       return vmBuildString;
 #if STACKVM
 	case 1007: { /* interpreter build info */
 		extern char *__interpBuildInfo;
-		return __interpBuildInfo;
+		return (const char *)__interpBuildInfo;
 	}
 # if COGVM
 	case 1008: { /* cogit build info */
 		extern char *__cogitBuildInfo;
-		return __cogitBuildInfo;
+		return (const char *)__cogitBuildInfo;
 	}
 # endif
 #endif
 
 	  case 1009: /* source tree version info */
-		return sourceVersionString(' ');
+		return (const char *)sourceVersionString(' ');
 
     /* Windows internals */
     case 10001: /* addl. hardware info */
@@ -2847,35 +2868,6 @@ GetAttributeString(sqInt id)
   }
   return NULL;
 }
-
-sqInt
-attributeSize(sqInt id)
-{
-  char *attrValue;
-  attrValue = GetAttributeString(id);
-  if (!attrValue) return primitiveFail();
-  return strlen(attrValue);
-}
-
-sqInt
-getAttributeIntoLength(sqInt id, sqInt byteArrayIndex, sqInt length)
-{
-  char *srcPtr, *dstPtr, *end;
-  int charsToMove;
-
-  srcPtr = GetAttributeString(id);
-  if (!srcPtr) return 0;
-  charsToMove = strlen(srcPtr);
-  if (charsToMove > length)
-    charsToMove = length;
-
-  dstPtr = (char *) byteArrayIndex;
-  end = srcPtr + charsToMove;
-  while (srcPtr < end)
-    *dstPtr++ = *srcPtr++;
-  return charsToMove;
-}
-
 
 /****************************************************************************/
 /*                      File Startup                                        */

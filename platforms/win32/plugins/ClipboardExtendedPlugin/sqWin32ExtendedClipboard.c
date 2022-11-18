@@ -80,6 +80,8 @@ sqPasteboardPutItemFlavordatalengthformatTypeformatLength(CLIPBOARDTYPE inPasteb
 void
 sqPasteboardPutItemFlavordatalengthformatType(CLIPBOARDTYPE inPasteboard, char *inData, sqInt dataLength, sqInt format)
 {
+	HANDLE globalMem;
+
 	if (dataLength <= 0) {
 		interpreterProxy->primitiveFailFor(PrimErrBadArgument);
 		return;
@@ -88,21 +90,50 @@ sqPasteboardPutItemFlavordatalengthformatType(CLIPBOARDTYPE inPasteboard, char *
 		interpreterProxy->primitiveFailFor(PrimErrOperationFailed);
 		return;
 	}
-	HANDLE globalMem = GlobalAlloc(GMEM_MOVEABLE, dataLength);
-	if (!globalMem) {
-		CloseClipboard();
-		interpreterProxy->primitiveFailFor(PrimErrNoCMemory);
+	if (format == CF_BITMAP) {
+		interpreterProxy->primitiveFailFor(PrimErrUnsupported);
 		return;
 	}
-	void *globalBytes = GlobalLock(globalMem);
-	if (!globalBytes) {
-		CloseClipboard();
-		GlobalFree(globalMem);
-		interpreterProxy->primitiveFailFor(PrimErrOperationFailed);
-		return;
+	else {
+		globalMem = GlobalAlloc(GMEM_MOVEABLE, dataLength);
+		if (!globalMem) {
+			CloseClipboard();
+			interpreterProxy->primitiveFailFor(PrimErrNoCMemory);
+			return;
+		}
+		void *globalBytes = GlobalLock(globalMem);
+		if (!globalBytes) {
+			CloseClipboard();
+			GlobalFree(globalMem);
+			interpreterProxy->primitiveFailFor(PrimErrOperationFailed);
+			return;
+		}
+		PBITMAPINFOHEADER pdib = (BITMAPINFOHEADER *)inData; // Paul Atreides??
+
+		// If the data is either CF_DIB or CF_DIBV5 and it is a top-down bitmap
+		// (biHeight negative) then turn it into a bottom-up bitmap to suit Windows
+		if ((format == CF_DIB || format == CF_DIBV5)
+		 && pdib->biHeight < 0) {
+			unsigned char *dest = globalBytes;
+			long scanLineLength = pdib->biWidth * pdib->biBitCount / 8;
+			char *source, *start;
+			assert(pdib->biSizeImage + sizeof(*pdib) < dataLength);
+			pdib->biHeight = - pdib->biHeight; // temporary!!
+			memcpy(dest, inData, dataLength - pdib->biSizeImage);
+			pdib->biHeight = - pdib->biHeight; // undo the damage
+			dest += dataLength - pdib->biSizeImage;
+			start = inData + dataLength - pdib->biSizeImage;
+			source = inData + dataLength - scanLineLength;
+			while (source > start) {
+				memcpy(dest, source, scanLineLength);
+				dest += scanLineLength;
+				source -= scanLineLength;
+			}
+		}
+		else
+			memcpy(globalBytes, inData, dataLength);
+		GlobalUnlock(globalMem);
 	}
-	memcpy(globalBytes, inData, dataLength);
-	GlobalUnlock(globalMem);
 	(void)EmptyClipboard();
 	if (!SetClipboardData((UINT)format, globalMem)) {
 		CloseClipboard();
@@ -124,26 +155,11 @@ sqInt
 sqPasteboardCopyItemFlavorDataformat(CLIPBOARDTYPE inPasteboard, sqInt format)
 {
 	sqInt outData = 0;
-#if 1
 	if (!OpenClipboard(myWindow())) {
 		interpreterProxy->primitiveFailFor(PrimErrOperationFailed);
 		return 0;
 	}
-#else
-	if (!OpenClipboard(NULL)) {
-		interpreterProxy->primitiveFailFor(PrimErrOperationFailed);
-		return 0;
-	}
-#endif
 	HANDLE data = GetClipboardData((UINT)format);
-#if _UNICODE
-	warnPrintfW
-#else
-	warnPrintf
-#endif
-				(TEXT("sqPasteboardCopyItemFlavorDataformat %d %p\n"),
-				(int)format,
-				data);
 	// *%^$!# Microsoft do it again; CF_BITMAP is an exception; the memory
 	// must not be locked.  WTF?!?!
 	if (format == CF_BITMAP) {
@@ -169,10 +185,15 @@ sqPasteboardCopyItemFlavorDataformat(CLIPBOARDTYPE inPasteboard, sqInt format)
 								(PrimErrOSError,GetLastError());
 			return 0;
 		}
-#define WidthIndex 0
-#define HeightIndex 1
-#define DepthIndex 2
-#define BitsIndex 3
+#define FormBitsIndex 0
+#define FormWidthIndex 1
+#define FormHeightIndex 2
+#define FormDepthIndex 3
+
+#define BitsIndex 0
+#define WidthIndex 1
+#define HeightIndex 2
+#define DepthIndex 3
 #define ColourTableIndex 4
 #define ArraySize (ColourTableIndex + 1)
 		outData = interpreterProxy->instantiateClassindexableSize
@@ -183,6 +204,10 @@ sqPasteboardCopyItemFlavorDataformat(CLIPBOARDTYPE inPasteboard, sqInt format)
 		if (!outBits)
 			outData = 0;
 		if (outData) {
+			interpreterProxy->storePointerofObjectwithValue
+								(BitsIndex,
+								 outData,
+								 outBits);
 			interpreterProxy->storePointerofObjectwithValue
 								(WidthIndex,
 								 outData,
@@ -195,10 +220,6 @@ sqPasteboardCopyItemFlavorDataformat(CLIPBOARDTYPE inPasteboard, sqInt format)
 								(DepthIndex,
 								 outData,
 								 interpreterProxy->integerObjectOf(bm.bmBitsPixel));
-			interpreterProxy->storePointerofObjectwithValue
-								(BitsIndex,
-								 outData,
-								 outBits);
 			if (bm.bmBits)
 				memcpy(interpreterProxy->firstIndexableField(outBits),
 						bm.bmBits,
@@ -222,10 +243,34 @@ sqPasteboardCopyItemFlavorDataformat(CLIPBOARDTYPE inPasteboard, sqInt format)
 			return 0;
 		}
 		outData = interpreterProxy->instantiateClassindexableSize(interpreterProxy->classByteArray(), GlobalSize(data));
-		if (outData)
-			memcpy(interpreterProxy->firstIndexableField(outData),
-				   dataBytes,
-				   GlobalSize(data));
+		if (outData) {
+			PBITMAPINFOHEADER pdib = (BITMAPINFOHEADER *)dataBytes; // Paul Atreides??
+
+			// If the data is either CF_DIB or CF_DIBV5 and it is a bottom-up bitmap
+			// (biHeight not negative) then turn it into a top-down bitmap to suit Squeak
+			if ((format == CF_DIB || format == CF_DIBV5)
+			 && pdib->biHeight > 0) {
+				unsigned char *dest = interpreterProxy->firstIndexableField(outData);
+				long size = GlobalSize(data);
+				long scanLineLength = pdib->biWidth * pdib->biBitCount / 8;
+				unsigned char *source, *start;
+				assert(pdib->biSizeImage + sizeof(*pdib) < size);
+				pdib->biHeight = - pdib->biHeight;
+				memcpy(dest, dataBytes, size - pdib->biSizeImage);
+				dest += size - pdib->biSizeImage;
+				start = dataBytes + size - pdib->biSizeImage;
+				source = dataBytes + size - scanLineLength;
+				while (source > start) {
+					memcpy(dest, source, scanLineLength);
+					dest += scanLineLength;
+					source -= scanLineLength;
+				}
+			}
+			else
+				memcpy(interpreterProxy->firstIndexableField(outData),
+					   dataBytes,
+					   GlobalSize(data));
+		}
 	}
 	if (format != CF_BITMAP)
 		GlobalUnlock(data);
@@ -236,4 +281,17 @@ sqPasteboardCopyItemFlavorDataformat(CLIPBOARDTYPE inPasteboard, sqInt format)
 		return interpreterProxy->nilObject();
 	}
     return outData;
+}
+
+sqInt
+sqPasteboardhasDataInFormatformatLength(CLIPBOARDTYPE inPasteboard, char *format, sqInt formatLength)
+{
+	interpreterProxy->primitiveFailFor(PrimErrUnsupported);
+	return interpreterProxy->nilObject();
+}
+
+sqInt
+sqPasteboardhasDataInFormat(CLIPBOARDTYPE inPasteboard, sqInt format)
+{
+	return IsClipboardFormatAvailable(format);
 }

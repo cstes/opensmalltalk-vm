@@ -26,6 +26,13 @@ sqInt sqFileOpen(void *f, char* fileNameIndex, sqInt fileNameSize, sqInt writeFl
 /* Import from sqWin32Window.c */
 extern HWND stWindow;
 
+// There appears to be a Windows bug (in at least Windows 10) such that
+// if a file is dropped from an Open File Dialog opened by the FileDialogPlugin
+// then the GlobalFree below will corrupt the Windows heap.  I know; no one
+// should do this; but users can be capricious. We would rather risk a storage
+// leak than have users deal with unexpected and hard to debug crashes.
+extern int okToFreeSTGMEDIUMHGLOBAL = 1;
+
 #if 0
 #define DPRINTF(x) printf x
 #else
@@ -67,7 +74,7 @@ WORD DibNumColors (VOID FAR * pv)
   else
     bits = lpbc->bcBitCount;
 
-  switch (bits){
+  switch (bits) {
     case 1: return 2;
     case 4: return 16;
     case 8: return 256;
@@ -77,16 +84,13 @@ WORD DibNumColors (VOID FAR * pv)
 
 WORD PaletteSize (VOID FAR * pv)
 {
-  LPBITMAPINFOHEADER lpbi;
-  WORD               NumColors;
-
-  lpbi      = (LPBITMAPINFOHEADER)pv;
-  NumColors = DibNumColors(lpbi);
+  LPBITMAPINFOHEADER lpbi      = (LPBITMAPINFOHEADER)pv;
+  WORD               numColors = DibNumColors(lpbi);
 
   if (lpbi->biSize == sizeof(BITMAPCOREHEADER))
-    return (WORD)(NumColors * sizeof(RGBTRIPLE));
+    return numColors * sizeof(RGBTRIPLE);
   else
-    return (WORD)(NumColors * sizeof(RGBQUAD));
+    return numColors * sizeof(RGBQUAD);
 }
 
 HANDLE DibFromBitmap (
@@ -268,8 +272,8 @@ static char** dropFiles = NULL;
 
 static void freeDropFiles(void) {
   int i;
-  if(dropFiles) {
-    for(i=0; i < numDropFiles; i++)
+  if (dropFiles) {
+    for (i=0; i < numDropFiles; i++)
       free(dropFiles[i]);
     free(dropFiles);
     dropFiles = NULL;
@@ -321,20 +325,20 @@ STDMETHODIMP DropTarget_DragEnter(DropTarget *dt,
   {
     IEnumFORMATETC *fmt;
     hRes = ido->lpVtbl->EnumFormatEtc(ido, DATADIR_GET, &fmt);
-    if(hRes == S_OK) {
+    if (hRes == S_OK) {
       DPRINTF(("Enumerating formats\n"));
       hRes = fmt->lpVtbl->Reset(fmt);
-      if(FAILED(hRes)) DPRINTF(("Reset() failed (errCode = %x)\n"));
+      if (FAILED(hRes)) DPRINTF(("Reset() failed (errCode = %x)\n"));
       do {
 	DWORD num;
 	FORMATETC fmtEtc[1];
 	FORMATETC *fmtRec = fmtEtc;
 	hRes = fmt->lpVtbl->Next(fmt, 1, fmtRec, &num);
-	if(hRes == S_OK) {
+	if (hRes == S_OK) {
 	  /* got it */
 	  DPRINTF(("New format:\n"));
 	  DPRINTF(("\tCLIPFORMAT: %d ", fmtRec->cfFormat));
-	  switch(fmtRec->cfFormat) {
+	  switch (fmtRec->cfFormat) {
 	  case CF_TEXT: DPRINTF(("(text)")); break;
 	  case CF_BITMAP: DPRINTF(("(bitmap)")); break;
 	  case CF_METAFILEPICT: DPRINTF(("(metafilepict)")); break;
@@ -357,7 +361,7 @@ STDMETHODIMP DropTarget_DragEnter(DropTarget *dt,
 	  case CF_DSPENHMETAFILE: DPRINTF(("(private enhanced metafile)")); break;
 	  }
 	  DPRINTF(("\n"));
-	  if(fmtRec->ptd) {
+	  if (fmtRec->ptd) {
 	    char *base = (char*) (fmtRec->ptd);
 	    DPRINTF(("\tDriver name: %s\n",
 		     base+(fmtRec->ptd->tdDriverNameOffset)));
@@ -367,24 +371,24 @@ STDMETHODIMP DropTarget_DragEnter(DropTarget *dt,
 		     base+(fmtRec->ptd->tdPortNameOffset)));
 	  }
 	  DPRINTF(("\tdwAspect: %d ",fmtRec->dwAspect));
-	  if(fmtRec->dwAspect & DVASPECT_CONTENT) DPRINTF(("(content)")); 
-	  if(fmtRec->dwAspect & DVASPECT_THUMBNAIL) DPRINTF(("(thumbnail)")); 
-	  if(fmtRec->dwAspect & DVASPECT_ICON) DPRINTF(("(icon)")); 
-	  if(fmtRec->dwAspect & DVASPECT_DOCPRINT) DPRINTF(("(docprint)")); 
+	  if (fmtRec->dwAspect & DVASPECT_CONTENT) DPRINTF(("(content)")); 
+	  if (fmtRec->dwAspect & DVASPECT_THUMBNAIL) DPRINTF(("(thumbnail)")); 
+	  if (fmtRec->dwAspect & DVASPECT_ICON) DPRINTF(("(icon)")); 
+	  if (fmtRec->dwAspect & DVASPECT_DOCPRINT) DPRINTF(("(docprint)")); 
 	  }
 	  DPRINTF(("\n"));
 
 	  DPRINTF(("\tTYMED: %d ", fmtRec->tymed));
-	  if(fmtRec->tymed & TYMED_HGLOBAL) DPRINTF(("(HGLOBAL)"));
-	  if(fmtRec->tymed & TYMED_FILE) DPRINTF(("(FILE)"));
-	  if(fmtRec->tymed & TYMED_ISTREAM) DPRINTF(("(IStream)"));
-	  if(fmtRec->tymed & TYMED_ISTORAGE) DPRINTF(("(IStorage)"));
-	  if(fmtRec->tymed & TYMED_GDI) DPRINTF(("(GDI)"));
-	  if(fmtRec->tymed & TYMED_MFPICT) DPRINTF(("(MFPICT)"));
-	  if(fmtRec->tymed & TYMED_ENHMF) DPRINTF(("(ENHMF)"));
+	  if (fmtRec->tymed & TYMED_HGLOBAL) DPRINTF(("(HGLOBAL)"));
+	  if (fmtRec->tymed & TYMED_FILE) DPRINTF(("(FILE)"));
+	  if (fmtRec->tymed & TYMED_ISTREAM) DPRINTF(("(IStream)"));
+	  if (fmtRec->tymed & TYMED_ISTORAGE) DPRINTF(("(IStorage)"));
+	  if (fmtRec->tymed & TYMED_GDI) DPRINTF(("(GDI)"));
+	  if (fmtRec->tymed & TYMED_MFPICT) DPRINTF(("(MFPICT)"));
+	  if (fmtRec->tymed & TYMED_ENHMF) DPRINTF(("(ENHMF)"));
 	  DPRINTF(("\n"));
-      } while(hRes == S_OK);
-      if(FAILED(hRes)) {
+      } while (hRes == S_OK);
+      if (FAILED(hRes)) {
 	DPRINTF(("Next() failed (errCode = %x)\n"));
       }
       hRes = fmt->lpVtbl->Release(fmt);
@@ -402,7 +406,7 @@ STDMETHODIMP DropTarget_DragEnter(DropTarget *dt,
   fmtetc.cfFormat = CF_HDROP;
   fmtetc.tymed = TYMED_HGLOBAL;
   hRes = ido->lpVtbl->QueryGetData(ido, &fmtetc);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     DPRINTF(("That works.\n"));
     *effect = DROPEFFECT_COPY; /* that's what we want */
     signalDropEnter(pt);
@@ -413,7 +417,7 @@ STDMETHODIMP DropTarget_DragEnter(DropTarget *dt,
   fmtetc.cfFormat = CF_DIB;
   fmtetc.tymed = TYMED_HGLOBAL;
   hRes = ido->lpVtbl->QueryGetData(ido, &fmtetc);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     DPRINTF(("That works.\n"));
     *effect = DROPEFFECT_COPY; /* that's what we want */
     signalDropEnter(pt);
@@ -424,7 +428,7 @@ STDMETHODIMP DropTarget_DragEnter(DropTarget *dt,
   fmtetc.cfFormat = CF_BITMAP;
   fmtetc.tymed = TYMED_GDI;
   hRes = ido->lpVtbl->QueryGetData(ido, &fmtetc);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     DPRINTF(("That works.\n"));
     *effect = DROPEFFECT_COPY; /* that's what we want */
     signalDropEnter(pt);
@@ -435,7 +439,7 @@ STDMETHODIMP DropTarget_DragEnter(DropTarget *dt,
   fmtetc.cfFormat = CF_ENHMETAFILE;
   fmtetc.tymed = TYMED_ENHMF;
   hRes = ido->lpVtbl->QueryGetData(ido, &fmtetc);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     DPRINTF(("That works.\n"));
     *effect = DROPEFFECT_COPY; /* that's what we want */
     signalDropEnter(pt);
@@ -499,14 +503,14 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
   DPRINTF(("Looking for file...\n"));
 
   hRes = ido->lpVtbl->GetData(ido, &fmtetc, &medium);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     HGLOBAL hDrop = medium.hGlobal;
     DWORD i;
 
     DPRINTF(("Success\n"));
     numDropFiles = DragQueryFileW(hDrop, -1, NULL, 0);
     dropFiles = calloc(numDropFiles, sizeof(char*));
-    for(i=0; i<numDropFiles; i++) {
+    for (i=0; i<numDropFiles; i++) {
       WCHAR *tmpPath;
       int len;
       len = DragQueryFileW(hDrop, i, NULL, 0);
@@ -520,15 +524,16 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
     }
     DragFinish(hDrop);
     signalDrop(pt);
-    if(medium.pUnkForRelease == NULL) {
-      GlobalFree(hDrop);
+    if (medium.pUnkForRelease == NULL) {
+	  if (okToFreeSTGMEDIUMHGLOBAL)
+		  GlobalFree(hDrop);
     } else {
       medium.pUnkForRelease->lpVtbl->Release(medium.pUnkForRelease);
     }
     return S_OK;
   }
 
-  if(FAILED(hRes)) {
+  if (FAILED(hRes)) {
     DPRINTF(("GetData failed (errCode = %x)\n", hRes));
   }
 
@@ -540,7 +545,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
   DPRINTF(("Looking for HDIB...\n"));
 
   hRes = ido->lpVtbl->GetData(ido, &fmtetc, &medium);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     WCHAR tmpNameW[MAX_PATH+1];
     HANDLE hDib = medium.hGlobal;
 
@@ -548,15 +553,15 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
 
     GetTempPathW(MAX_PATH,tmpNameW);
     wcscat(tmpNameW,L"$$squeak$$.bmp");
-    if(WriteDIB(tmpNameW, hDib)) {
+    if (WriteDIB(tmpNameW, hDib)) {
       char tmpNameA[MAX_PATH_UTF8 + 1];
-	  if(WideCharToMultiByte(CP_UTF8, 0, tmpNameW, -1, tmpNameA, MAX_PATH_UTF8, NULL, NULL)) {
+	  if (WideCharToMultiByte(CP_UTF8, 0, tmpNameW, -1, tmpNameA, MAX_PATH_UTF8, NULL, NULL)) {
         numDropFiles = 1;
         dropFiles = calloc(1, sizeof(void*));
         dropFiles[0] = _strdup(tmpNameA);
 	  }
     }
-    if(medium.pUnkForRelease == NULL) {
+    if (medium.pUnkForRelease == NULL) {
       GlobalFree(hDib);
     } else {
       medium.pUnkForRelease->lpVtbl->Release(medium.pUnkForRelease);
@@ -565,7 +570,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
     return S_OK;
   }
 
-  if(FAILED(hRes)) {
+  if (FAILED(hRes)) {
     DPRINTF(("GetData failed (errCode = %x)\n", hRes));
   }
 
@@ -577,7 +582,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
   DPRINTF(("Looking for bitmap...\n"));
 
   hRes = ido->lpVtbl->GetData(ido, &fmtetc, &medium);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     WCHAR tmpNameW[MAX_PATH+1];
     HANDLE hDib;
     HBITMAP hBM = medium.hBitmap;
@@ -587,8 +592,8 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
     GetTempPathW(MAX_PATH,tmpNameW);
     wcscat(tmpNameW,L"$$squeak$$.bmp");
     hDib = DibFromBitmap(hBM, BI_RGB, 0, NULL);
-    if(hDib) {
-      if(WriteDIB(tmpNameW, hDib)) {
+    if (hDib) {
+      if (WriteDIB(tmpNameW, hDib)) {
         char tmpNameA[MAX_PATH_UTF8 + 1];
         if (WideCharToMultiByte(CP_UTF8, 0, tmpNameW, -1, tmpNameA, MAX_PATH_UTF8, NULL, NULL)) {
           numDropFiles = 1;
@@ -598,7 +603,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
       }
       DeleteObject(hDib);
     }
-    if(medium.pUnkForRelease == NULL) {
+    if (medium.pUnkForRelease == NULL) {
       DeleteObject(hBM);
     } else {
       medium.pUnkForRelease->lpVtbl->Release(medium.pUnkForRelease);
@@ -606,7 +611,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
     signalDrop(pt);
     return S_OK;
   }
-  if(FAILED(hRes)) {
+  if (FAILED(hRes)) {
     DPRINTF(("GetData failed (errCode = %x)\n", hRes));
   }
 
@@ -618,7 +623,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
   DPRINTF(("Looking for ENHMF...\n"));
 
   hRes = ido->lpVtbl->GetData(ido, &fmtetc, &medium);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     WCHAR tmpNameW[MAX_PATH+1];
     HANDLE hMF = medium.hGlobal;
     HANDLE hDib;
@@ -627,7 +632,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
 
     DPRINTF(("Success\n"));
 
-    if(GetEnhMetaFileHeader(hMF, sizeof(header), &header) == 0) {
+    if (GetEnhMetaFileHeader(hMF, sizeof(header), &header) == 0) {
       DPRINTF(("GetEnhMetaFileHeader failed\n"));
     }
     bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
@@ -643,17 +648,17 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
       RECT rect;
 
       hDC = GetDC(stWindow);
-      if(!hDC) DPRINTF(("GetDC() failed\n"));
+      if (!hDC) DPRINTF(("GetDC() failed\n"));
       //      hDib = CreateDIBitmap(hDC, &bmi, 0, NULL, &bmi, DIB_RGB_COLORS);
       hBM = CreateDIBSection(hDC, &bmi, DIB_RGB_COLORS, NULL, NULL, 0);
-      if(!hBM) DPRINTF(("CreateDIBSection() failed\n"));
+      if (!hBM) DPRINTF(("CreateDIBSection() failed\n"));
       mDC = CreateCompatibleDC(hDC);
-      if(!mDC) DPRINTF(("CreateCompatibleDC() failed\n"));
+      if (!mDC) DPRINTF(("CreateCompatibleDC() failed\n"));
       old = SelectObject(mDC, hBM);
       rect.left = rect.top = 0;
       rect.right = bmi.bmiHeader.biWidth;
       rect.bottom = bmi.bmiHeader.biHeight;
-      if(!PlayEnhMetaFile(mDC, hMF, &rect))
+      if (!PlayEnhMetaFile(mDC, hMF, &rect))
 	DPRINTF(("PlayEnhMetaFile() failed\n"));
       SelectObject(mDC, old);
       DeleteDC(mDC);
@@ -664,7 +669,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
 
     GetTempPathW(MAX_PATH,tmpNameW);
     wcscat(tmpNameW,L"$$squeak$$.bmp");
-    if(WriteDIB(tmpNameW, hDib)) {
+    if (WriteDIB(tmpNameW, hDib)) {
       char tmpNameA[MAX_PATH_UTF8 + 1];
       if (WideCharToMultiByte(CP_UTF8, 0, tmpNameW, -1, tmpNameA, MAX_PATH_UTF8, NULL, NULL)) {
         numDropFiles = 1;
@@ -673,7 +678,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
       }
     }
     GlobalFree(hDib);
-    if(medium.pUnkForRelease == NULL) {
+    if (medium.pUnkForRelease == NULL) {
       DeleteObject(hMF);
     } else {
       medium.pUnkForRelease->lpVtbl->Release(medium.pUnkForRelease);
@@ -682,7 +687,7 @@ STDMETHODIMP DropTarget_Drop(DropTarget *dt,
     return S_OK;
   }
 
-  if(FAILED(hRes)) {
+  if (FAILED(hRes)) {
     DPRINTF(("GetData failed (errCode = %x)\n", hRes));
   }
 
@@ -707,13 +712,13 @@ void SetupDragAndDrop(void) {
 #if 0
   return;
 #endif
-  if(!isInitialized) {
+  if (!isInitialized) {
     stDropTarget.vtbl = vtDropTarget;
     stDropTarget.ref = 0;
     isInitialized = 1;
   }
   hRes = RegisterDragDrop(stWindow, (LPDROPTARGET)&stDropTarget);
-  if(hRes == S_OK) {
+  if (hRes == S_OK) {
     DPRINTF(("Registered drop target\n"));
   } else {
     DPRINTF(("Drop registration failed (errCode: %x)\n", hRes));
@@ -721,7 +726,7 @@ void SetupDragAndDrop(void) {
 }
 
 void ShutdownDragAndDrop(void) {
-  if(isInitialized) {
+  if (isInitialized) {
     RevokeDragDrop(stWindow);
     isInitialized = 0;
   }
@@ -759,7 +764,7 @@ int dropShutdown(void) {
 char *
 dropRequestFileName(int dropIndex) {
   DPRINTF(("dropRequestFileName(%d)\n", dropIndex));
-  if(dropIndex < 1 || dropIndex > numDropFiles) return NULL;
+  if (dropIndex < 1 || dropIndex > numDropFiles) return NULL;
   return dropFiles[dropIndex-1];
 }
 
@@ -770,7 +775,7 @@ dropRequestURI(int dropIndex) { return NULL; }
 sqInt dropRequestFileHandle(sqInt dropIndex) {
   sqInt fileHandle;
   char *dropName = dropRequestFileName(dropIndex);
-  if(!dropName)
+  if (!dropName)
     return interpreterProxy->nilObject();
   fileHandle = interpreterProxy->instantiateClassindexableSize(interpreterProxy->classByteArray(), fileRecordSize());
   sqFileOpen(fileValueOf(fileHandle),dropName, strlen(dropName), 0);
