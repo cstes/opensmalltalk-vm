@@ -5,6 +5,7 @@
 #      - win64x64\common\Makefile.tools
 #      - win32x86\common\Makefile.tools
 #   Also, extend $PATH since MSYS is installed but not conveniently accessible
+#   Extend $PATH since MSYS is installed but not conveniently accessible
 #   in a GitHub-Actions Windows environment.
 
 [[ -z "${MSYS_SYS}" ]] && exit 2
