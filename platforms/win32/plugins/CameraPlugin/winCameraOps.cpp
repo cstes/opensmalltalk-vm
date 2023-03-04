@@ -26,15 +26,27 @@ extern "C" {
 
 extern struct VirtualMachine *interpreterProxy;
 
-static inline void *
-forwardDeclarationHack (struct Camera *aCamera, long lThisBufferSize,
-						int *widthp, int *heightp, int *semaphoreIndexp,
-						char *errorCodep, char *alreadyErrorp);
-static inline void
-setErrorCode(struct Camera *aCamera, char errorCode);
-}
+// The Microsoft class needs to refer to the plugin's Camera stuff, and vice
+// verse. This struct is (must remain!!) exactly the same as the plugin's
+// data following the Microsoft data. See "typedef struct Camera" below.
+// forwardDeclarationHack answers the address of bufferAOrNil in the full
+// struct Camera, allowing the BufferCB method to access the plugin's data.
+typedef struct OurCamera {
+	void *					bufferAOrNil;
+	void *					bufferBOrNil;
+	void *					freshestBuffer;
+	int						bufferSize;
+	int						width;
+	int						height;
+	int						semaphoreIndex;
+	char					useBNotA;
+	char					errorCode;
+	char					mirrorImage;
+} OurCamera;
 
-#define FLIP_IN_CAPTURE 1
+static inline OurCamera *
+forwardDeclarationHack (struct Camera *aCamera);
+}
 
 class CSampleGrabberCB : public ISampleGrabberCB {
 public:
@@ -70,22 +82,31 @@ public:
 
 	STDMETHODIMP BufferCB(double dblThisSampleTime, BYTE * pThisBuf, long lThisBufSize)
 	{
-		void *theBuffer;
-		char alreadyHaveErrorCondition = 0, errorCode = 0;
-		int semaphoreIndex;
-		int width, height;
+		void * theBuffer;
 		int pixelBytes = (lThisBufSize / 3) * 4;
 
 		if (!pThisBuf || !lThisBufSize)
 			return E_POINTER;
 
-		theBuffer = forwardDeclarationHack (myCamera,
-											pixelBytes,
-											&width, &height,
-											&semaphoreIndex,
-											&errorCode,
-											&alreadyHaveErrorCondition);
-		if (!theBuffer && !errorCode) {
+		OurCamera *aCamera = forwardDeclarationHack(myCamera);
+		int alreadyHaveErrorCondition = aCamera->errorCode;
+
+		if (aCamera->bufferBOrNil) {
+			theBuffer = aCamera->useBNotA
+							? aCamera->bufferBOrNil
+							: aCamera->bufferAOrNil;
+			aCamera->useBNotA = !aCamera->useBNotA;
+		}
+		else
+			theBuffer = aCamera->bufferAOrNil;
+
+		if (theBuffer) {
+			// One or two buffers have been installed vua CameraSetFrameBuffers
+			// It may be too small; we must check
+			if (pixelBytes > aCamera->bufferSize)
+				aCamera->errorCode = PrimErrWritePastObject;
+		}
+		else if (!aCamera->errorCode) {
 			// No synchronization with CameraSetFrameBuffers et al.
 			// We assume this is in a higher-priority thread than Smalltalk.
 			if (pFrameBuf
@@ -98,38 +119,55 @@ public:
 				lFrameBufSize = pixelBytes;
 				if (!pFrameBuf) {
 					lFrameBufSize = 0;
-					setErrorCode(myCamera,PrimErrNoCMemory);
+					aCamera->errorCode = PrimErrNoCMemory;
 				}
 			}
 			theBuffer = pFrameBuf;
 		}
 
-		// Copy the bitmap data into the chosen buffer
-		if (!errorCode && theBuffer) {
-#if FLIP_IN_CAPTURE
-	// flip image vertically while copying to buffer
-	// N.B. For certain cameras this is unnecessary, see
-	// https://social.msdn.microsoft.com/Forums/windowsdesktop/en-US/bee4f7c0-5938-43ce-9db5-59a60b5f80bb/flip-webcam-vertically?forum=windowsdirectshowdevelopment
-			unsigned char *pSrc = pThisBuf;
-			for (int y = height - 1; y >= 0; y--) {
-				unsigned char *pDst = (unsigned char *)theBuffer + (4 * y * width);
-				int x = 0;
-				while (++x <= width) {
-					pDst[0] = pSrc[0];	// red
-					pDst[1] = pSrc[1];	// green
-					pDst[2] = pSrc[2];	// blue
-					pDst[3] = 255;		// alpha
-					pDst += 4;
-					pSrc += 3;
+// Copy the bitmap data into the chosen buffer
+// flip image vertically while copying to buffer
+// mirror image horizontally if aCamera->mirrorImage
+// N.B. For certain cameras this is unnecessary, see
+// https://social.msdn.microsoft.com/Forums/windowsdesktop/en-US/bee4f7c0-5938-43ce-9db5-59a60b5f80bb/flip-webcam-vertically?forum=windowsdirectshowdevelopment
+
+		if (!aCamera->errorCode && theBuffer) {
+			int x, y, width = aCamera->width;
+			unsigned char *pDst, *pSrc = pThisBuf;
+			if (aCamera->mirrorImage) {
+				for (y = aCamera->height; y > 0; --y) {
+					pDst = (unsigned char *)theBuffer + (4 * y * width);
+					x = width;
+					while (--x >= 0) {
+						pDst -= 4;
+						pDst[0] = pSrc[0];	// red
+						pDst[1] = pSrc[1];	// green
+						pDst[2] = pSrc[2];	// blue
+						pDst[3] = 255;		// alpha
+						pSrc += 3;
+					}
 				}
 			}
-#else
-			memcpy(theBuffer, pThisBuf, lThisBufSize);
-#endif
+			else {
+				for (y = aCamera->height - 1; y >= 0; --y) {
+					pDst = (unsigned char *)theBuffer + (4 * y * width);
+					x = width;
+					while (--x >= 0) {
+						pDst[0] = pSrc[0];	// red
+						pDst[1] = pSrc[1];	// green
+						pDst[2] = pSrc[2];	// blue
+						pDst[3] = 255;		// alpha
+						pDst += 4;
+						pSrc += 3;
+					}
+				}
+			}
+			if (theBuffer != pFrameBuf)
+				aCamera->freshestBuffer = theBuffer;
 		}
 		++frameCount;
-		if (!alreadyHaveErrorCondition && semaphoreIndex > 0)
-			interpreterProxy->signalSemaphoreWithIndex(semaphoreIndex);
+		if (!alreadyHaveErrorCondition && aCamera->semaphoreIndex > 0)
+			interpreterProxy->signalSemaphoreWithIndex(aCamera->semaphoreIndex);
 		return 0;
 	}
 };
@@ -151,14 +189,17 @@ typedef struct Camera {
 	IBaseFilter				*ppf;
 	ISampleGrabber			*pGrabber;
 	CSampleGrabberCB		 mCB;
+	// N.B. This is (and must remain) exactly the same as struct OurCamera above
 	void *					bufferAOrNil;
 	void *					bufferBOrNil;
-	sqInt					bufferSize;
-	int width;
-	int height;
-	int semaphoreIndex;
+	void *					freshestBuffer;
+	int						bufferSize;
+	int						width;
+	int						height;
+	int						semaphoreIndex;
 	char					useBNotA;
 	char					errorCode;
+	char					mirrorImage;
 } Camera;
 
 #define CAMERA_COUNT 4
@@ -188,43 +229,13 @@ static void SetFramesPerSecond(int fps);
 #endif
 #define SAFE_RELEASE(x) { if ((x) && InRangePtr(x)) (x)->Release(); (x) = nullptr; }
 
-/* Answer the buffer to use if the camera has a pinned object frame buffer,
- * or nil. Load other usefu variables. This is a hack to get around Camera
- * and CSampleGrabberCB needing to know about each other.
- */
-static inline void *
-forwardDeclarationHack (struct Camera *aCamera, long lThisBufferSize,
-						int *widthp, int *heightp, int *semaphoreIndexp,
-						char *errorCodep, char *alreadyErrorp)
+// Hack around Camera and CSampleGrabberCB needing to know about each other...
+
+static inline OurCamera *
+forwardDeclarationHack(struct Camera *aCamera)
 {
-	void *theBuffer;
-
-	if (aCamera->errorCode)
-		*alreadyErrorp = 1;
-	*widthp = aCamera->width;
-	*heightp = aCamera->height;
-	*semaphoreIndexp = aCamera->semaphoreIndex;
-
-	if (!aCamera->bufferAOrNil)
-		return 0;
-
-	if (aCamera->bufferBOrNil) {
-		theBuffer = aCamera->useBNotA
-						? aCamera->bufferBOrNil
-						: aCamera->bufferAOrNil;
-		aCamera->useBNotA = !aCamera->useBNotA;
-	}
-	else
-		theBuffer = aCamera->bufferAOrNil;
-	if (lThisBufferSize > aCamera->bufferSize) {
-		*errorCodep = aCamera->errorCode = PrimErrWritePastObject;
-		return 0;
-	}
-	return theBuffer;
+	return (OurCamera *)&aCamera->bufferAOrNil;
 }
-
-static inline void
-setErrorCode(struct Camera *aCamera, char ec) { aCamera->errorCode = ec; }
 
 //////////////////////////////////////////////
 // Entry Points
@@ -259,14 +270,8 @@ CameraClose(sqInt cameraNum)
 	SAFE_RELEASE(theCamera->pGrabber);
 	SAFE_RELEASE(theCamera->ppf);
 	SAFE_RELEASE(theCamera->pCamera);
-	theCamera->bufferAOrNil = 0;
-	theCamera->bufferBOrNil = 0;
-	theCamera->bufferSize = 0;
-	theCamera->width = 0;
-	theCamera->height = 0;
-	theCamera->semaphoreIndex = 0;
-	theCamera->useBNotA = 0;
-	theCamera->errorCode = 0;
+	// zero out the plugin's data
+	memset(&theCamera->bufferAOrNil, 0, sizeof(struct OurCamera));
 }
 
 sqInt
@@ -300,31 +305,10 @@ CameraGetFrame(sqInt cameraNum, unsigned char *buf, sqInt pixelCount)
 	if (camera->bufferAOrNil)
 		return framesSinceLastCall;
 
-#if FLIP_IN_CAPTURE
 	if (pixelCount > (camera->mCB.lFrameBufSize / 4))
 		pixelCount = camera->mCB.lFrameBufSize / 4;
 
 	memcpy(buf, camera->mCB.pFrameBuf, pixelCount * 4);
-#else
-	if (pixelCount > (camera->mCB.lFrameBufSize / 3))
-		pixelCount = camera->mCB.lFrameBufSize / 3;
-
-	// flip image vertically while copying to Squeak buf
-	// N.B. For certain cameras this is unnecessary, see
-	// https://social.msdn.microsoft.com/Forums/windowsdesktop/en-US/bee4f7c0-5938-43ce-9db5-59a60b5f80bb/flip-webcam-vertically?forum=windowsdirectshowdevelopment
-	unsigned char *pSrc = camera->mCB.pFrameBuf;
-	for (int w = camera->width, y = camera->height - 1; y >= 0; y--) {
-		unsigned char *pDst = &buf[4 * y * w];
-		for (int x = 0; x < w; x++) {
-			pDst[0] = pSrc[0];	// red
-			pDst[1] = pSrc[1];	// green
-			pDst[2] = pSrc[2];	// blue
-			pDst[3] = 255;		// alpha
-			pDst += 4;
-			pSrc += 3;
-		}
-	}
-#endif
 	return framesSinceLastCall;
 }
 
@@ -378,7 +362,7 @@ CameraGetSemaphore(sqInt cameraNum)
 sqInt
 CameraSetFrameBuffers(sqInt cameraNum, sqInt bufferA, sqInt bufferB)
 {
-	Camera *camera;
+  Camera *camera;
 
   if (!(camera = ActiveCamera(cameraNum)))
 	return PrimErrNotFound;
@@ -396,6 +380,7 @@ CameraSetFrameBuffers(sqInt cameraNum, sqInt bufferA, sqInt bufferB)
   camera->bufferBOrNil = bufferB
 						? interpreterProxy->firstIndexableField(bufferB)
 						: nullptr;
+  camera->freshestBuffer = 0;
   camera->bufferSize = byteSize;
   sqLowLevelMFence();
   // Need to free pixels carefully since camera may be running.
@@ -407,6 +392,27 @@ CameraSetFrameBuffers(sqInt cameraNum, sqInt bufferA, sqInt bufferB)
 	delete [] camera->mCB.pFrameBuf;
   }
   return 0;
+}
+
+// If double-buffering is in effect (set via CameraSetFrameBuffers) answer which
+// buffer contains the freshest data, either A (1) or B (2). If no buffer has
+// been filled yet, answer nil.  Otherwise fail with an appropriate error code.
+sqInt
+CameraGetLatestBufferIndex(sqInt cameraNum)
+{
+  Camera *camera;
+
+  if (!(camera = ActiveCamera(cameraNum)))
+	return PrimErrNotFound;
+
+  if (camera->freshestBuffer == camera->bufferAOrNil)
+	return 1;
+  if (camera->freshestBuffer == camera->bufferBOrNil)
+	return 2;
+  if (camera->bufferAOrNil)
+	return 0;
+
+  return -PrimErrInappropriate;
 }
 
 sqInt
@@ -426,21 +432,44 @@ CameraGetParam(sqInt cameraNum, sqInt paramNum)  // for debugging and testing
 	Camera *camera;
 
 	if (!(camera = ActiveCamera(cameraNum)))
-		return -1;
-	if (paramNum == 1)
-		return camera->mCB.frameCount;
-	if (paramNum == 2)
-		return camera->mCB.lFrameBufSize;
+		return -PrimErrNotFound;
+
+	// sanity check the forward declaration hack
+	if (&forwardDeclarationHack(camera)->bufferAOrNil != &camera->bufferAOrNil
+	 || &forwardDeclarationHack(camera)->mirrorImage != &camera->mirrorImage)
+		return -PrimErrInternalError;
+
+	switch (paramNum) {
+	case FrameCount:	return camera->mCB.frameCount;
+	case FrameByteSize:	return camera->mCB.lFrameBufSize;
+	case MirrorImage:	return camera->mirrorImage;
 #if 0
-	/* Negative values are platform specific info */
-	if (paramNum == -2) {
+		/* Negative values are platform specific info */
+	case -2: {
 		long capsFlags = 0;
 		camera->pVideoControl->GetCaps(camera->pVideoControl, &capsFlags);
 		return capsFlags;
-	}
+	  }
 #endif
+	}
 
-	return -2;
+	return -PrimErrBadArgument;
+}
+
+sqInt
+CameraSetParam(sqInt cameraNum, sqInt paramNum, sqInt paramValue)
+{
+	Camera *camera;
+
+	if (!(camera = ActiveCamera(cameraNum)))
+		return -PrimErrNotFound;
+
+	if (paramNum == MirrorImage) {
+		sqInt oldValue = camera->mirrorImage;
+		camera->mirrorImage = paramValue;
+		return oldValue;
+	}
+	return -PrimErrBadArgument;
 }
 
 //////////////////////////////////////////////

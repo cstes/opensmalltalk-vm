@@ -100,6 +100,7 @@ void printDevices();
   int						 pixelsByteSize;
   void						*bufferAOrNil;
   void						*bufferBOrNil;
+  void						*freshestBuffer;
   sqInt						 bufferSize;
   sqInt						 frameCount;
   int						 deviceID;
@@ -109,6 +110,7 @@ void printDevices();
   unsigned char				 errorCode;
   unsigned char				 bInitCalled;
   unsigned char				 useBNotA;
+  unsigned char				 mirrorImage;
 }
 @end
 
@@ -167,10 +169,22 @@ SqueakVideoGrabber *grabbers[CAMERA_COUNT];
 	}
 	if (!errorCode) {
 		CVPixelBufferLockBaseAddress(imageBuffer, 0);
-		memcpy(	theBuffer,
-				CVPixelBufferGetBaseAddress(imageBuffer),
-				currentWidth * currentHeight * 4);
+		if (mirrorImage) {
+			int *frame = CVPixelBufferGetBaseAddress(imageBuffer);
+			int *mirrored = theBuffer;
+			for (int y = 0; ++y <= currentHeight;) {
+				int *pixelp = frame + (y * currentWidth);
+				for (int x = currentWidth; --x >= 0;) 
+					*mirrored++ = *--pixelp;
+			}
+		}
+		else
+			memcpy(	theBuffer,
+					CVPixelBufferGetBaseAddress(imageBuffer),
+					currentWidth * currentHeight * 4);
 		CVPixelBufferUnlockBaseAddress(imageBuffer, 0);
+		if (theBuffer != pixels)
+			freshestBuffer = theBuffer;
 	}
 	frameCount++;
 	if (semaphoreIndex > 0 && !alreadyHaveErrorCondition)
@@ -352,6 +366,7 @@ SqueakVideoGrabber *grabbers[CAMERA_COUNT];
   bInitCalled = YES;
   frameCount = 0;
   semaphoreIndex = -1;
+  mirrorImage = 0;
   grabbers[deviceID] = self;
   return self;
 }
@@ -382,7 +397,7 @@ SqueakVideoGrabber *grabbers[CAMERA_COUNT];
     captureSession = NULL;
     captureOutput = NULL;
     captureInput = NULL;
-	bufferAOrNil = bufferBOrNil = 0;
+	bufferAOrNil = bufferBOrNil = freshestBuffer = (void *)0;
 	bufferSize = 0;
     grabbers[cameraNum-1] = NULL;
   }
@@ -417,24 +432,38 @@ getDeviceUID(sqInt cameraNum)
   return (char*)[((AVCaptureDevice*)[devices objectAtIndex: cameraNum-1]).uniqueID UTF8String];
 }
 
+static inline SqueakVideoGrabber *
+getCamera(sqInt cameraNum)
+{
+	return cameraNum >= 1 && cameraNum <= CAMERA_COUNT
+			? grabbers[cameraNum-1]
+			: 0;
+}
+
+static inline sqInt
+thisCameraIsOpen(SqueakVideoGrabber *grabber)
+{	return	grabber->pixels != (unsigned int *)0
+		 || grabber->bufferAOrNil != (void *)0;
+}
+
 sqInt
 CameraOpen(sqInt cameraNum, sqInt desiredWidth, sqInt desiredHeight)
 {
-  if (cameraNum<1 || cameraNum>CAMERA_COUNT)
-	return false;
+	if (cameraNum < 1 || cameraNum > CAMERA_COUNT)
+		return false;
 
-  if (!ensureCameraAccess())
-	return false;
+	if (!ensureCameraAccess())
+		return false;
 
-  SqueakVideoGrabber *grabber = grabbers[cameraNum-1];
+	SqueakVideoGrabber *grabber = grabbers[cameraNum-1];
 
-  if (grabber && grabber->pixels)
-	return true;
+	if (grabber && thisCameraIsOpen(grabber))
+		return true;
 
-  grabber = [SqueakVideoGrabber alloc];
-  if (!grabber)
-	return false;
-  return [grabber	initCapture: cameraNum-1
+	grabber = [SqueakVideoGrabber alloc];
+	if (!grabber)
+		return false;
+	return [grabber	initCapture: cameraNum-1
 					desiredWidth: desiredWidth
 					desiredHeight: desiredHeight];
 }
@@ -442,65 +471,59 @@ CameraOpen(sqInt cameraNum, sqInt desiredWidth, sqInt desiredHeight)
 void 
 CameraClose(sqInt cameraNum)
 {
-  SqueakVideoGrabber *grabber;
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
 
-  if (cameraNum >= 1 && cameraNum <= CAMERA_COUNT
-	&& (grabber = grabbers[cameraNum-1]))
-	  [grabber stopCapture: cameraNum];
+	if (grabber)
+		[grabber stopCapture: cameraNum];
 }
 
 sqInt
 CameraExtent(sqInt cameraNum)
 {
-  SqueakVideoGrabber *grabber;
+  SqueakVideoGrabber *grabber = getCamera(cameraNum);
 
   if (!ensureCameraAccess())
 	return 0;
 
-  /* if the camera is already open answer its extent */
-  if (cameraNum >= 1 && cameraNum <= CAMERA_COUNT
-	&& (grabber = grabbers[cameraNum-1]))
-	return grabber->width <<16 | grabber->height;
+	// if the camera is already open answer its extent
+	if (grabber)
+		return grabber->width << 16 | grabber->height;
 #if 1
-  return 0;
-#else
-  // This could work if cameras were shut down correctly, but they're not yet.
-  if (!getDeviceName(cameraNum))
 	return 0;
-  long extent;
-  /* Open to discover default resolution */
-  (void)CameraOpen(cameraNum, 0, 0);
-  grabber = grabbers[cameraNum-1];
-  extent = grabber ? (grabber->width <<16 | grabber->height) : 0;
-  CameraClose(cameraNum);
-  return extent;
+#else
+	// This could work if cameras were shut down correctly, but they're not yet.
+	if (!getDeviceName(cameraNum))
+		return 0;
+	/* Open to discover default resolution */
+	(void)CameraOpen(cameraNum, 0, 0);
+	grabber = grabbers[cameraNum-1];
+	long extent = grabber ? (grabber->width << 16 | grabber->height) : 0;
+	CameraClose(cameraNum);
+	return extent;
 #endif
 }
 
 sqInt
 CameraGetFrame(sqInt cameraNum, unsigned char *buf, sqInt pixelCount)
 {
-  if (cameraNum < 1 || cameraNum > CAMERA_COUNT)
-	return -1;
-  SqueakVideoGrabber *grabber = grabbers[cameraNum-1];
-  if (!grabber)
-	return -1;
-  if (grabber->errorCode) {
-	int theCode = grabber->errorCode;
-	grabber->errorCode = 0;
-	return -theCode;
-  }
-  if (grabber->pixels || grabber->bufferAOrNil) {
-    int ourFrames = grabber->frameCount;
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
+	if (!grabber)
+		return -1;
+	if (grabber->errorCode) {
+		int theCode = grabber->errorCode;
+		grabber->errorCode = 0;
+		return -theCode;
+	}
+	if (!thisCameraIsOpen(grabber))
+		return 0;
 	if (grabber->pixels) {
 #define min(a,b) ((a)<=(b)?(a):(b))
 		long actualPixelCount = grabber->width * grabber->height;
 		memcpy(buf, grabber->pixels, min(pixelCount,actualPixelCount) * 4);
 	}
-    grabber->frameCount = 0;
-    return ourFrames;
-  }
-  return 0;
+	int ourFrames = grabber->frameCount;
+	grabber->frameCount = 0;
+	return ourFrames;
 }
 
 char *
@@ -514,19 +537,19 @@ CameraUID(sqInt cameraNum)
 static sqInt
 CameraIsOpen(sqInt cameraNum)
 {
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
 	return
-		cameraNum >= 1 && cameraNum <= CAMERA_COUNT
-		&& grabbers[cameraNum-1]
-		&& grabbers[cameraNum-1]->pixels != (unsigned int *)0;
+		grabber
+			? thisCameraIsOpen(grabber)
+			: 0;
 }
 
 sqInt
 CameraGetSemaphore(sqInt cameraNum)
 {
-  SqueakVideoGrabber *grabber;
+  SqueakVideoGrabber *grabber = getCamera(cameraNum);
 
-  return cameraNum >= 1 && cameraNum <= CAMERA_COUNT
-	  && (grabber = grabbers[cameraNum-1])
+  return grabber
 	  && grabber->semaphoreIndex > 0
 		? grabber->semaphoreIndex
 		: 0;
@@ -535,62 +558,104 @@ CameraGetSemaphore(sqInt cameraNum)
 sqInt
 CameraSetSemaphore(sqInt cameraNum, sqInt semaphoreIndex)
 {
-  SqueakVideoGrabber *grabber;
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
 
-  if (cameraNum >= 1 && cameraNum <= CAMERA_COUNT
-	&& (grabber = grabbers[cameraNum-1])) {
-		grabber->semaphoreIndex = semaphoreIndex;
-		return 0;
-	}
-	return PrimErrNotFound;
+	if (!grabber)
+		return PrimErrNotFound;
+
+	grabber->semaphoreIndex = semaphoreIndex;
+	return 0;
 }
 
 // primSetCameraBuffers ensures buffers are pinned non-pointer objs if non-null
 sqInt
 CameraSetFrameBuffers(sqInt cameraNum, sqInt bufferA, sqInt bufferB)
 {
-  SqueakVideoGrabber *grabber;
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
 
-  if (cameraNum < 1
-   || cameraNum > CAMERA_COUNT
-   || !(grabber = grabbers[cameraNum-1]))
-	return PrimErrNotFound;
+	if (!grabber)
+		return PrimErrNotFound;
 
-  sqInt byteSize = interpreterProxy->byteSizeOf(bufferA);
+	sqInt byteSize = interpreterProxy->byteSizeOf(bufferA);
 
-  if (bufferB
-   && byteSize != interpreterProxy->byteSizeOf(bufferB))
-	return PrimErrInappropriate;
+	if (bufferB
+	 && byteSize != interpreterProxy->byteSizeOf(bufferB))
+		return PrimErrInappropriate;
 
-  if (grabber->width * grabber->height * 4 > byteSize)
-	return PrimErrWritePastObject;
+	if (grabber->width * grabber->height * 4 > byteSize)
+		return PrimErrWritePastObject;
 
-  grabber->bufferAOrNil = interpreterProxy->firstIndexableField(bufferA);
-  grabber->bufferBOrNil = bufferB
-						? interpreterProxy->firstIndexableField(bufferB)
-						: (void *)0;
-  grabber->bufferSize = byteSize;
-  sqLowLevelMFence();
-  // Need to free pixels carefully since camera may be running.
-  if (grabber->pixels) {
-	unsigned int *the_pixels = grabber->pixels;
-	grabber->pixelsByteSize = 0;
-	grabber->pixels = 0;
+	grabber->bufferAOrNil = interpreterProxy->firstIndexableField(bufferA);
+	grabber->bufferBOrNil = bufferB
+							? interpreterProxy->firstIndexableField(bufferB)
+							: (void *)0;
+	grabber->freshestBuffer = (void *)0;
+	grabber->bufferSize = byteSize;
 	sqLowLevelMFence();
-	free(the_pixels);
-  }
-  return 0;
+	// Need to free pixels carefully since camera may be running.
+	if (grabber->pixels) {
+		unsigned int *the_pixels = grabber->pixels;
+		grabber->pixelsByteSize = 0;
+		grabber->pixels = 0;
+		sqLowLevelMFence();
+		free(the_pixels);
+	}
+	return 0;
+}
+
+// If double-buffering is in effect (set via CameraSetFrameBuffers) answer which
+// buffer contains the freshest data, either A (1) or B (2). If no buffer has
+// been filled yet, answer nil.  Otherwise fail with an appropriate error code.
+sqInt
+CameraGetLatestBufferIndex(sqInt cameraNum)
+{
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
+
+	if (!grabber)
+		return PrimErrNotFound;
+
+	if (grabber->freshestBuffer == grabber->bufferAOrNil)
+		return 1;
+	if (grabber->freshestBuffer == grabber->bufferBOrNil)
+		return 2;
+	if (grabber->bufferAOrNil)
+		return 0;
+
+	return -PrimErrInappropriate;
 }
 
 sqInt
 CameraGetParam(sqInt cameraNum, sqInt paramNum)
 {
-	if (!CameraIsOpen(cameraNum)) return -1;
-	if (paramNum == 1) return grabbers[cameraNum-1]->frameCount;
-	if (paramNum == 2) return grabbers[cameraNum-1]->width
-							* grabbers[cameraNum-1]->height * 4;
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
 
-	return -2;
+	if (!grabber)
+		return PrimErrNotFound;
+
+	switch (paramNum) {
+	case FrameCount:	return grabber->frameCount;
+	case FrameByteSize:	return grabber->width * grabber->height * 4;
+	case MirrorImage:	return grabber->mirrorImage;
+	}
+	return -PrimErrBadArgument;
+}
+
+sqInt
+CameraSetParam(sqInt cameraNum, sqInt paramNum, sqInt paramValue)
+{
+	sqInt oldValue;
+	SqueakVideoGrabber *grabber = getCamera(cameraNum);
+
+	if (!grabber)
+		return PrimErrNotFound;
+
+	switch (paramNum) {
+	case MirrorImage:
+		oldValue = grabber->mirrorImage;
+		grabber->mirrorImage = paramValue;
+		return oldValue;
+	}
+	return -PrimErrBadArgument;
 }
 
 sqInt

@@ -117,6 +117,7 @@ struct camInfo_t {
 
 	unsigned long frameCount;
 	struct v4l2_capability cap;
+	unsigned char mirrorImage;
 } camInfo[CAMERA_COUNT];
 
 typedef struct camInfo_t *camPtr;
@@ -202,6 +203,7 @@ libCon(void)
 	  cam->ioMethod = IO_METHOD_MMAP;
 	  cam->nBuffers = 2;
 	  cam->frameCount = 0;
+	  cam->mirrorImage = 0;
 	  cam->semaphoreIndex = -1;
 	  vBufReset(&(cam->vBuf));
 	  /* Pixel format auto selected for ease/speed of conversion */
@@ -774,19 +776,35 @@ initCamera(camPtr cam, int w, int h)
 
 
 sqInt
-CameraGetParam(sqInt camNum, sqInt paramNum)
+CameraGetParam(sqInt cameraNum, sqInt paramNum)
 {
 	camPtr cam = camera(camNum);
 
-	if (!cam) return -1;
-	if (paramNum == 1)
-		return cam->frameCount
-			? cam->frameCount
-			: (cameraReadable(cam) ? 1 : 0);
-	if (paramNum == 2)
-		return cam->bmWidth * cam->bmHeight * 4;
+	if (!cam)
+		return -PrimErrNotFound;
+	switch (paramNum) {
+	case FrameCount:	return cam->frameCount;
+	case FrameByteSize:	return cam->width * cam->height * 4;
+	case MirrorImage:	return cam->mirrorImage;
+	}
+	return -PrimErrBadArgument;
+}
 
-	return -2;
+sqInt
+CameraSetParam(sqInt cameraNum, sqInt paramNum, sqInt paramValue)
+{
+	camPtr cam = camera(camNum);
+
+	if (!cam)
+		return -PrimErrNotFound;
+	if (paramNum == MirrorImage) {
+		sqInt oldValue = cam->mirrorImage;
+		if (1) // For now
+			return PrimErrUnsupported;
+		cam->mirrorImage = paramValue;
+		return oldValue;
+	}
+	return -PrimErrBadArgument;
 }
 
 
@@ -934,6 +952,17 @@ CameraSetFrameBuffers(sqInt cameraNum, sqInt bufferA, sqInt bufferB)
 	// For now
 	return PrimErrUnsupported;
 }
+
+// If double-buffering is in effect (set via CameraSetFrameBuffers) answer which
+// buffer contains the freshest data, either A (1) or B (2). If no buffer has
+// been filled yet, answer nil.  Otherwise fail with an appropriate error code.
+sqInt
+CameraGetLatestBufferIndex(sqInt camNum)
+{
+	// For now
+	return PrimErrUnsupported;
+}
+
 
 /* Alas, see for example
  * https://www.kernel.org/doc/html/v5.4/media/uapi/v4l/async.html
