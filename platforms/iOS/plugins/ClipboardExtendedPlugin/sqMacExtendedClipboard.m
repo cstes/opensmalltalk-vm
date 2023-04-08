@@ -1,6 +1,5 @@
 /*
  *  sqMacExtendedClipboard.m
- *  SqueakClipboardExtendedxcodeproj
  *
  *  Created by John Sterling Mcintosh on 4/21/06.
  *  Copyright 2006-2010 Corporate Smalltalk Consulting ltd. All rights reserved.
@@ -25,20 +24,23 @@
  *  WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
  *  FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  *  OTHER DEALINGS IN THE SOFTWARE.
- *
  */
 
-#include "sqMacExtendedClipboard.h"
+#include "sqVirtualMachine.h"
+#ifdef BUILD_FOR_OSX
 #import <Cocoa/Cocoa.h>
+# define CLIPBOARDTYPE NSPasteboard *
+#else
+# define CLIPBOARDTYPE UIPasteboard *
+#endif
+#include "ClipboardExtendedPlugin.h"
 
-extern struct VirtualMachine* interpreterProxy;
+extern struct VirtualMachine *interpreterProxy;
 
 void
 sqPasteboardClear(CLIPBOARDTYPE inPasteboard)
 {
-    NSArray *arrayOfTypes = [NSArray array];
-
-    [inPasteboard declareTypes: arrayOfTypes owner: nil];
+    [inPasteboard clearContents];
 }
 
 sqInt
@@ -62,8 +64,12 @@ sqPasteboardCopyItemFlavorsitemNumber(CLIPBOARDTYPE inPasteboard, sqInt formatNu
     const char *utf8data = [formatType UTF8String];
     formatTypeLength = strlen(utf8data);
     sqInt outData = interpreterProxy->instantiateClassindexableSize(interpreterProxy->classString(), formatTypeLength);
-    unsigned char *formatConverted = interpreterProxy->firstIndexableField(outData);
-    memcpy(formatConverted,utf8data,formatTypeLength);
+	if (!outData)
+		interpreterProxy->primitiveFailFor(PrimErrNoMemory);
+	else {
+		unsigned char *formatConverted = interpreterProxy->firstIndexableField(outData);
+		memcpy(formatConverted,utf8data,formatTypeLength);
+	}
 
     return outData;
 }
@@ -81,8 +87,16 @@ sqPasteboardPutItemFlavordatalengthformatTypeformatLength(CLIPBOARDTYPE inPasteb
     NSData* data = AUTORELEASEOBJ([[NSData alloc ] initWithBytes: inData length: dataLength]);
     NSArray *arrayOfTypes = @[formatType];
 
-    [inPasteboard declareTypes: arrayOfTypes owner: nil];
-    [inPasteboard setData: data forType: formatType];
+    [inPasteboard addTypes: arrayOfTypes owner: nil];
+	int ok = true;
+	@try {
+		ok = [inPasteboard setData: data forType: formatType];
+	}
+	@catch (NSException *exception) {
+		ok = false;
+	}
+	if (!ok)
+		interpreterProxy->primitiveFailFor(PrimErrOperationFailed);
 }
 
 void
@@ -104,9 +118,12 @@ sqPasteboardCopyItemFlavorDataformatformatLength(CLIPBOARDTYPE inPasteboard, cha
     NSData *dataBuffer = [inPasteboard dataForType: type];
     sqInt dataLength = [dataBuffer length];
     sqInt outData = interpreterProxy->instantiateClassindexableSize(interpreterProxy->classByteArray(), dataLength);
-    char *outDataPtr = (char *) interpreterProxy->firstIndexableField(outData);
-    [dataBuffer getBytes: outDataPtr];
-
+	if (!outData) {
+		interpreterProxy->primitiveFailFor(PrimErrNoMemory);
+		return interpreterProxy->nilObject();
+	}
+	char *outDataPtr = (char *) interpreterProxy->firstIndexableField(outData);
+	[dataBuffer getBytes: outDataPtr length: dataLength];
     return outData;
 }
 
