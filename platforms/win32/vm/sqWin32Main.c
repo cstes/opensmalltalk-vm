@@ -38,18 +38,6 @@
 #include "sqAssert.h"
 #include "sqWin32Backtrace.h"
 #include "sqSCCSVersion.h"
-#if COGVM
-# include "cogmethod.h"
-# if COGMTVM
-#	include "cointerpmt.h"
-# else
-#	include "cointerp.h"
-# endif
-#else
-#  if SPURVM
-     extern usqInt maxOldSpaceSize;
-#  endif
-#endif
 
 
 /************************************************************************************************************/
@@ -533,18 +521,16 @@ void SetSystemTrayIcon(BOOL on)
 
 char *GetVMOption(int id)
 {
-  if (id < numOptionsVM)
+  if (id >= 0 && id < numOptionsVM)
     return vmOptions[id];
-  else
-    return NULL;
+  return NULL;
 }
 
 char *GetImageOption(int id)
 {
-  if (id < numOptionsImage)
+  if (id >= 0 && id < numOptionsImage)
     return imageOptions[id];
-  else
-    return NULL;
+  return NULL;
 }
 
 char *ioGetLogDirectory(void) {
@@ -1945,12 +1931,16 @@ strtobkmg(const char *str)
 static int
 parseVMArgument(int argc, char *argv[])
 {
+#if SPURVM
+	extern usqInt maxOldSpaceSize;
+#endif
+
 	/* flags */
-	if      (!strcmp(argv[0], VMOPTION("help")))		{
+	if      (!strcmp(argv[0], VMOPTION("help"))) {
 		printUsage(1);
 		return 1;
 	}
-	else if (!strcmp(argv[0], VMOPTION("version")))	{ versionInfo();	return 1; }
+	else if (!strcmp(argv[0], VMOPTION("version"))) { versionInfo();	return 1; }
 	else if (!strcmp(argv[0], VMOPTION("headless"))) { fHeadlessImage = true; return 1; }
 	else if (!strcmp(argv[0], VMOPTION("headfull"))) { fHeadlessImage = false; return 1;}
 	else if (!strcmp(argv[0], VMOPTION("timephases"))) {
@@ -2066,6 +2056,14 @@ parseVMArgument(int argc, char *argv[])
 		return 1; }
 	else if (!strcmp(argv[0], VMOPTION("debugfailonffiexception"))) {
 		debugBreakOnException = true;
+		return 1; }
+	else if (argc > 1 && !strcmp(argv[0], VMOPTION("eventtrace"))) {
+		extern sqInt eventTraceMask;
+		eventTraceMask = atoi(argv[1]);
+		return 2; }
+	else if (!strncmp(argv[0], VMOPTION("eventtrace:"), strlen(VMOPTION("eventtrace:")))) {
+		extern sqInt eventTraceMask;
+		eventTraceMask = atoi(argv[0]+strlen(VMOPTION("leakcheck:")));
 		return 1; }
 #endif /* STACKVM */
 #if COGVM
