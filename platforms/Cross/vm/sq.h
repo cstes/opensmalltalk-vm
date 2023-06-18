@@ -129,11 +129,11 @@ unsigned int ioMicroMSecs(void);
 /* Time API, Cog uses 64-bit microseconds fron 1901 as much as possible */
 void forceInterruptCheckFromHeartbeat(void);
 void ioInitTime(void);
-unsigned long long ioUTCMicrosecondsNow(void);
-unsigned long long ioUTCMicroseconds(void);
-unsigned long long ioLocalMicrosecondsNow(void);
-unsigned long long ioLocalMicroseconds(void);
-unsigned long long ioUTCStartMicroseconds(void);
+usqLong ioUTCMicrosecondsNow(void);
+usqLong ioUTCMicroseconds(void);
+usqLong ioLocalMicrosecondsNow(void);
+usqLong ioLocalMicroseconds(void);
+usqLong ioUTCStartMicroseconds(void);
 sqInt	ioLocalSecondsOffset(void);
 void	ioUpdateVMTimezone(void);
 void	ioSynchronousCheckForEvents(void);
@@ -156,10 +156,10 @@ extern int isCFramePointerInUse(usqIntptr_t *cFpPtr, usqIntptr_t *cSpPtr);
  * variables, which may allow for a stack backtrace to be generated on an
  * exception.
  */
-extern void ifValidWriteBackStackPointersSaveTo(void *,void *,char **,char **);
 extern void reportMinimumUnusedHeadroom();
 extern void reportMinimumUnusedHeadroomOn(FILE *);
 # endif
+extern void ifValidWriteBackStackPointersSaveTo(void *,void *,char **,char **);
 extern void dumpPrimTraceLog();
 extern void dumpPrimTraceLogOn(FILE *);
 #endif /* STACKVM */
@@ -393,7 +393,12 @@ sqInt ioProcessEvents(void);
 #define EventTypeWindow		5
 #define EventTypeComplex	6 /* For iPhone apps */
 #define EventTypeMouseWheel	7 /* optional; see sendWheelEvents & vm param 48 */
-#define EventTypePlugin		8 /* Terf: events from ActiveX Controls */
+#define EventTypePlugin		8 /* Virtend: events from ActiveX Controls */
+
+#define EVENT_TYPE_MASKS_INIT \
+  {	"  1: None", "  2: Mouse", "  4: Keyboard", "  8: DragDropFiles", \
+	" 16: Menu", " 32: Window", " 64: Complex", "128: MouseWheel", \
+	"256: Plugin", (char *)0 }
 
 
 /* Keypress state for keyboard events. */

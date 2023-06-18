@@ -32,6 +32,15 @@
 
 extern struct VirtualMachine *interpreterProxy;
 
+/* Import from sqWin32Main.c */
+sqInt isFileHandleATTY(HANDLE fdHandle);
+sqInt fileHandleType(HANDLE fdHandle);
+
+#if defined(__MINGW32__) || defined(__MINGW64__)
+# include <io.h> // for _get_osfhandle
+#endif
+
+
 #define true  1
 #define false 0
 
@@ -106,7 +115,7 @@ sqFileClose(SQFile *f)
   if (!sqFileValid(f))
     FAIL();
   if (!CloseHandle(FILE_HANDLE(f)))
-    FAIL();
+	return interpreterProxy->primitiveFailForOSError(GetLastError());
   RemoveHandleFromTable(win32Files, FILE_HANDLE(f));
   f->file = NULL;
   f->sessionID = 0;
@@ -351,7 +360,7 @@ int	status = 0;
 sqInt
 sqFileDescriptorType(int fdNum)
 {
-	return fileHandleType(_get_osfhandle(fdNum));
+	return fileHandleType((HANDLE)_get_osfhandle(fdNum));
 }
 
 size_t
