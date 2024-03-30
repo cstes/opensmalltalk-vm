@@ -1476,60 +1476,63 @@ void __cdecl Cleanup(void)
 /****************************************************************************/
 /*                      Embedded Images                                     */
 /****************************************************************************/
-#if 0
-/* SQ_IMAGE_MAGIC - the magic number for embedded images "SQIM" */
-#define SQ_IMAGE_MAGIC 0x83817377
+// Look for an image as a resource. type: RT_RCDATA. Check all such resources
+// until a candidate is found.
+// If found, answer the ImageIsAResource marker, otherwise return NULL.
 
-sqImageFile findEmbeddedImage(void) {
-	sqImageFile f;
-	int endMarker;
-	int magic;
-	int start;
-	int length;
+static LPSTR imageResourceName = NULL;
+#define IMRESTYPE (LPCSTR)RT_RCDATA
 
-	f = sqImageFileOpen(vmNameA, "rb");
-	if (!f) {
-		MessageBox(0,"Error opening VM",VM_NAME,MB_OK);
-		return 0;
-	}
-	endMarker = sqImageFileSize(f) - 8;
-	magic = start = 0;
-	sqImageFileSeek(f, endMarker);
-    sqImageFileRead(&magic, 1, 4, f);
-	sqImageFileRead(&start, 1, 4, f);
-	sqMessageBox(MB_OK, TEXT("Magic number", "Expected:\t%x\nFound:\t\t%x"), SQ_IMAGE_MAGIC, magic);
-	/* Magic number must be okay and start must be within executable boundaries */
-	if (magic != SQ_IMAGE_MAGIC || start < 0 || start >= endMarker) {
-		/* nope */
-		sqImageFileClose(f);
-		return 0;
-	}
-	/* Might have an embedded image; seek back and double check */
-	sqImageFileSeek(f,start);
-	sqImageFileRead(&magic, 1, 4, f);
-	sqMessageBox(MB_OK, TEXT("Magic number", "Expected:\t%x\nFound:\t\t%x"), SQ_IMAGE_MAGIC, magic);
-	if (magic != SQ_IMAGE_MAGIC) {
-		/* nope */
-		sqImageFileClose(f);
-		return 0;
-	}
-	/* now triple check for image format */
-	sqImageFileRead(&magic, 1, 4, f);
-	if (!readableFormat(magic) && !readableFormat(byteSwapped(magic)) {
-		/* nope */
-		sqImageFileClose(f);
-		return 0;
-	}
-	/* Gotcha! */
-	sqImageFileSeek(f, sqImageFilePosition(f) - 4);
-	strcpy(imageName, name);
-	MultiByteToWideChar(CP_UTF8,0,imageName,-1,imageNameW,MAX_PATH,NULL,NULL);
-	imageSize = endMarker - sqImageFilePosition(f);
-	return f;
-}
-#else
-sqImageFile findEmbeddedImage(void) { return 0; }
+#define theVM (HMODULE)0
+static BOOL
+enumImageResources(HMODULE hModule, LPCSTR lpType, LPSTR lpName, LONG_PTR ign)
+{
+	HRSRC resource;
+	HGLOBAL handle;
+	void *data;
+	DWORD dataSize;
+
+#if 0 // debug/development
+	fprintf(stderr,"enumImageResources %s\n", lpName);
 #endif
+	if (lpType != IMRESTYPE)
+		return true; // keep on enumerating
+
+	// N.B. There is no need to close the handes answered here; that's only
+	// necessary in 16-bit Windows
+	if ((resource = FindResourceA(theVM,lpName,IMRESTYPE))
+	 && (handle = LoadResource(theVM,resource))
+	 && (data = LockResource(handle))
+	 && (dataSize = SizeofResource(theVM,resource))
+	 && checkImageHeaderFromBytesAndSize(data,(sqInt)dataSize)) {
+		imageResourceName = malloc(strlen(lpName) + 1);
+		strcpy(imageResourceName,lpName);
+		sqFilePluginNoteImageResourceData(data,dataSize);
+		return false; // found resource, so stop enumerating
+	}
+#if 0 // debug/development
+	if (!resource)
+		fprintf(stderr,"FindResourceA %s => %lu\n", lpName, GetLastError());
+	else if (!handle)
+		fprintf(stderr,"LoadResource => %lu\n", GetLastError());
+#endif
+	return true; // keep on enumerating
+}
+
+static sqImageFile
+findEmbeddedImage(void)
+{
+	if (!imageResourceName)
+		EnumResourceNamesA(theVM,IMRESTYPE,enumImageResources,0);
+#if 0 // debug/development
+	if (imageResourceName)
+		fprintf(stderr,"imageResourceName: %s\n", imageResourceName);
+#endif
+	return imageResourceName ? ImageIsAResource : 0;
+}
+
+sqInt sqImageFileIsEmbedded() { return imageResourceName != NULL; }
+#undef theVM
 
 
 /****************************************************************************/
@@ -1730,7 +1733,14 @@ sqMain(int argc, char *argv[])
     if (!imageFile) {
       imageFile = sqImageFileOpen(imageName,"rb");
       readImageFromFileHeapSizeStartingAt(imageFile, virtualMemory, 0);
-    } else {
+    }
+	else {
+	  if (imageFile == ImageIsAResource) {
+		int i;
+		for (i = strlen(imageResourceName); i >= 0; --i)
+			imageNameW[i] = imageName[i] = imageResourceName[i];
+	  }
+		
       readImageFromFileHeapSizeStartingAt(imageFile, virtualMemory, sqImageFilePosition(imageFile));
     }
     sqImageFileClose(imageFile);
@@ -2263,13 +2273,14 @@ parseGenericArgs(int argc, char *argv[])
 			return 1; /* ok not to have an image since user can choose one. */
 		default:
 			/* It is OK to run the console VM provided an image has been
-			 * provided by the ini file.
+			 * provided by the ini file, or if there is an embedded image.
 			 */
-			return imageName[0] != 0;
+			return imageName[0] != 0
+				|| findEmbeddedImage();
 		}
 
 	/* Always allow the command-line to override an implicit image name. */
-	if (*argv[0] && IsImage(argv[0])) {
+	if (*argv[0] && !findEmbeddedImage() && IsImage(argv[0])) {
 		strncpy(imageName, argv[0], MAX_PATH_UTF8);
 		MultiByteToWideChar(CP_UTF8, 0, imageName, -1, imageNameW, MAX_PATH);
 		/* if provided, the image is a vm argument. */
