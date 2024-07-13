@@ -36,6 +36,7 @@
 #include "sq.h"
 #include "sqAssert.h"
 #include "sqMemoryAccess.h"
+#define INCLUDE_SIF_CODE 1
 #include "sqImageFileAccess.h"
 #include "sqaio.h"
 #include "sqUnixCharConv.h"
@@ -58,6 +59,7 @@
 #include <errno.h>
 #include <signal.h>
 #include <fcntl.h>
+#include <dlfcn.h>
 #if !defined(NOEXECINFO) && defined(HAVE_EXECINFO_H)
 # include <execinfo.h>
 # define BACKTRACE_DEPTH 64
@@ -89,7 +91,7 @@ popOutputFile()
 #define DefaultHeapSize		  20	     	/* megabytes BEYOND actual image size */
 #define DefaultMmapSize		1024     	/* megabytes of virtual memory */
 
-       char  *documentName= 0;			/* name if launced from document */
+       char  *documentName= 0;			/* name if launched from document */
        char   shortImageName[MAXPATHLEN+1];	/* image name */
        char   imageName[MAXPATHLEN+1];		/* full path to image */
 static char   vmName[MAXPATHLEN+1];		/* full path to vm */
@@ -112,17 +114,10 @@ static long   extraMemory=	0;
 
 static int    useItimer=	1;	/* 0 to disable itimer-based clock */
 static int    installHandlers=	1;	/* 0 to disable sigusr1 & sigsegv handlers */
-       int    noEvents=		0;	/* 1 to disable new event handling */
+static int    noEvents=		0;	/* 1 to disable new event handling */
        int    noSoundMixer=	0;	/* 1 to disable writing sound mixer levels */
        char  *squeakPlugins=	0;	/* plugin path */
        int    runAsSingleInstance=0;
-#if !STACKVM && !COGVM
-       int    useJit=		0;	/* use default */
-       int    jitProcs=		0;	/* use default */
-       int    jitMaxPIC=	0;	/* use default */
-#else
-# define useJit 0
-#endif
        int    withSpy=		0;
 
        int    uxDropFileCount=	0;	/* number of dropped items	*/
@@ -139,8 +134,6 @@ int inModalLoop= 0;
 #endif
 
 int sqIgnorePluginErrors	= 0;
-int runInterpreter		= 1;
-
 
 #include "SqDisplay.h"
 #include "SqSound.h"
@@ -563,12 +556,9 @@ getAttributeString(sqInt id)
 
 /*** event handling ***/
 
-
 sqInt inputEventSemaIndex= 0;
 
-
 /* set asynchronous input event semaphore  */
-
 sqInt
 ioSetInputSemaphore(sqInt semaIndex)
 {
@@ -1499,22 +1489,6 @@ strtobkmg(const char *str)
   return value;
 }
 
-#if !STACKVM && !COGVM
-static int
-jitArgs(char *str)
-{
-  char *endptr= str;
-  int  args= 3;				/* default JIT mode = fast compiler */
-  
-  if (*str == '\0') return args;
-  if (*str != ',')
-    args= strtol(str, &endptr, 10);	/* mode */
-  while (*endptr == ',')		/* [,debugFlag]* */
-    args|= (1 << (strtol(endptr + 1, &endptr, 10) + 8));
-  return args;
-}
-#endif /* !STACKVM && !COGVM */
-
 /* ----------------- built-in main vm module */
 
 # include <locale.h>
@@ -1541,11 +1515,6 @@ vm_parseEnvironment(void)
   if ((ev= getenv("SQUEAK_PLUGINS")))	squeakPlugins= strdup(ev);
   if ((ev= getenv("SQUEAK_NOEVENTS")))	noEvents= 1;
   if ((ev= getenv("SQUEAK_NOTIMER")))	useItimer= 0;
-#if !STACKVM && !COGVM
-  if ((ev= getenv("SQUEAK_JIT")))	useJit= jitArgs(ev);
-  if ((ev= getenv("SQUEAK_PROCS")))	jitProcs= atoi(ev);
-  if ((ev= getenv("SQUEAK_MAXPIC")))	jitMaxPIC= atoi(ev);
-#endif /* !STACKVM && !COGVM */
   if ((ev= getenv("SQUEAK_ENCODING")))	setEncoding(&sqTextEncoding, ev);
   if ((ev= getenv("SQUEAK_PATHENC")))	setEncoding(&uxPathEncoding, ev);
   if ((ev= getenv("SQUEAK_TEXTENC")))	setEncoding(&uxTextEncoding, ev);
@@ -1649,11 +1618,6 @@ vm_parseArgument(int argc, char **argv)
   else if (!strcmp(argv[0], VMOPTION("blockonwarn")))  { erroronwarn = blockOnError = 1; return 1; }
   else if (!strcmp(argv[0], VMOPTION("exitonwarn")))   { erroronwarn    = 1; return 1; }
   else if (!strcmp(argv[0], VMOPTION("timephases")))   { printPhaseTime(1) ; return 1; }
-#if !STACKVM && !COGVM
-  else if (!strncmp(argv[0],VMOPTION("jit"), 4))    { useJit  = jitArgs(argv[0]+4); return 1; }
-  else if (!strcmp(argv[0], VMOPTION("nojit")))     { useJit  = 0; return 1; }
-  else if (!strcmp(argv[0], VMOPTION("spy")))       { withSpy = 1; return 1; }
-#endif /* !STACKVM && !COGVM */
 #if defined(AIO_DEBUG)
   else if (!strcmp(argv[0], VMOPTION("aiolog")))	{ aioDebugLogging = 1; return 1; }
 #endif
@@ -1663,10 +1627,6 @@ vm_parseArgument(int argc, char **argv)
   else if (!strcmp(argv[0], VMOPTION("single")))    { runAsSingleInstance=1; return 1; }
   /* option requires an argument */
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("memory")))   { extraMemory  = strtobkmg(argv[1]); return 2; }
-#if !STACKVM && !COGVM
-  else if (argc > 1 && !strcmp(argv[0], VMOPTION("procs")))    { jitProcs     = atoi(argv[1]);     return 2; }
-  else if (argc > 1 && !strcmp(argv[0], VMOPTION("maxpic")))   { jitMaxPIC    = atoi(argv[1]);     return 2; }
-#endif /* !STACKVM && !COGVM */
 #if !SPURVM
   else if (argc > 1 && !strcmp(argv[0], VMOPTION("mmap")))     { useMmap      = strtobkmg(argv[1]); return 2; }
 #endif
@@ -1918,9 +1878,6 @@ vm_printUsage(void)
 	printf("Deprecated:\n");
 	printf("  "VMOPTION("display")" <dpy>        equivalent to '-vm-display-X11 "VMOPTION("display")" <dpy>'\n");
 	printf("  "VMOPTION("headless")"             equivalent to '-vm-display-X11 "VMOPTION("headless")"'\n");
-# if !STACKVM
-	printf("  "VMOPTION("jit")"                  enable the dynamic compiler (if available)\n");
-# endif
 	printf("  "VMOPTION("nodisplay")"            equivalent to '-vm-display-null'\n");
 	printf("  "VMOPTION("nomixer")"              disable modification of mixer settings\n");
 	printf("  "VMOPTION("nosound")"              equivalent to '-vm-sound-null'\n");
@@ -1973,15 +1930,6 @@ usage()
   }
   modulesDo(m)
     m->printUsage();
-  if (useJit)
-    {
-      printf("\njit <option>s:\n");
-      printf("  "VMOPTION("align")" <n>            align functions at <n>-byte boundaries\n");
-      printf("  "VMOPTION("jit")"<o>[,<d>...]      set optimisation [and debug] levels\n");
-      printf("  "VMOPTION("maxpic")" <n>           set maximum PIC size to <n> entries\n");
-      printf("  "VMOPTION("procs")" <n>            allow <n> concurrent volatile processes\n");
-      printf("  "VMOPTION("spy")"                  enable the system spy\n");
-    }
   printf("\nNotes:\n");
   printf("  <imageName> defaults to `" DEFAULT_IMAGE_NAME "'.\n");
   modulesDo(m)
@@ -2150,29 +2098,48 @@ imgInit(void)
     /* read the image file and allocate memory for Squeak heap */
     int fd;
     struct stat sb;
-    char imagePath[MAXPATHLEN];
-    sq2uxPath(shortImageName, strlen(shortImageName), imagePath, MAXPATHLEN - 1, 1);
-    if (-1 == stat(imagePath, &sb) || (!S_ISREG(sb.st_mode) && !S_ISLNK(sb.st_mode))) {
-        imageNotFound(imagePath); // imageNotFound will exit
-    }
-    fd = sqImageFileOpen(imagePath, "rb"); // sqImageFileOpen handles the errors. fd is valid here
-#ifdef DEBUG_IMAGE
-    printf("fstat(%d) => %d\n", fd, fstat(fd, &sb));
-#endif
 
-    recordFullPathForImageName(shortImageName); /* full image path */
+	// first check for an embedded image
+	void *handle = dlopen(NULL, RTLD_NOW);
+	void *embeddedImage;
+	if (handle && (embeddedImage = dlsym(handle,"embeddedImage"))) {
+		strcpy(shortImageName,dlsym(handle,"embeddedImageName"));
+		fd = ((char *)embeddedImage)[0] == GZIPMagic0 && ((char *)embeddedImage)[1] == GZIPMagic1
+				? ImageIsEmbeddedAndCompressed
+				: ImageIsEmbedded;
+		unsigned long *imageSize = dlsym(handle,"embeddedImageSize");
+		unsigned long *compressedSize = dlsym(handle,"embeddedCompressedDataSize");
+		dlclose(handle);
+		noteEmbeddedImage(embeddedImage,
+						  *imageSize,
+						  compressedSize ? *compressedSize : 0);
+		sb.st_size = *imageSize;
+	}
+	else {
+		char imagePath[MAXPATHLEN];
+		sq2uxPath(shortImageName, strlen(shortImageName), imagePath, MAXPATHLEN - 1, 1);
+		if (-1 == stat(imagePath, &sb)
+		 || (!S_ISREG(sb.st_mode) && !S_ISLNK(sb.st_mode)))
+			imageNotFound(imagePath); // imageNotFound will exit
+		fd = sqImageFileOpen(imagePath, "rb"); // sqImageFileOpen handles the errors. fd is valid here
+#ifdef DEBUG_IMAGE
+		printf("fstat(%d) => %d\n", fd, fstat(fd, &sb));
+#endif
+		recordFullPathForImageName(shortImageName); /* full image path */
+	}
+
     if (extraMemory)
         useMmap= 0;
     else
         extraMemory= DefaultHeapSize * 1024 * 1024;
 #ifdef DEBUG_IMAGE
-    printf("image size %ld + heap size %ld (useMmap = %d)\n", (long)sb.st_size, extraMemory, useMmap);
+	printf("image size %ld + heap size %ld (useMmap = %d)\n", (long)sb.st_size, extraMemory, useMmap);
 #endif
 #if SPURVM
     readImageFromFileHeapSizeStartingAt(fd, 0, 0);
 #else
-    extraMemory += (long)sb.st_size;
-    readImageFromFileHeapSizeStartingAt(fd, extraMemory, 0);
+	extraMemory += (long)sb.st_size;
+	readImageFromFileHeapSizeStartingAt(fd, extraMemory, 0);
 #endif
     sqImageFileClose(fd);
 }
@@ -2293,31 +2260,6 @@ main(int argc, char **argv, char **envp)
    */
   dpy->winOpen(runAsSingleInstance ? squeakArgCnt : 0, squeakArgVec);
 
-#if defined(HAVE_LIBDL) && !STACKVM
-  if (useJit)
-    {
-      /* first try to find an internal dynamic compiler... */
-      void *handle= ioLoadModule(0);
-      void *comp= ioFindExternalFunctionIn("j_interpret", handle);
-      /* ...and if that fails... */
-      if (comp == 0)
-	{
-	  /* ...try to find an external one */
-	  handle= ioLoadModule("SqueakCompiler");
-	  if (handle != 0)
-	    comp= ioFindExternalFunctionIn("j_interpret", handle);
-	}
-      if (comp)
-	{
-	  ((void (*)(void))comp)();
-	  fprintf(stderr, "handing control back to interpret() -- have a nice day\n");
-	}
-      else
-	printf("could not find j_interpret\n");
-      exit(1);
-    }
-#endif /* defined(HAVE_LIBDL) && !STACKVM */
-
   if (installHandlers) {
 	struct sigaction sigusr1_handler_action, sigsegv_handler_action;
 
@@ -2340,10 +2282,8 @@ main(int argc, char **argv, char **envp)
 #endif
 
   /* run Squeak */
-  if (runInterpreter) {
-	printPhaseTime(2);
-    interpret();
-  }
+  printPhaseTime(2);
+  interpret();
 
   /* we need these, even if not referenced from main executable */
   (void)sq2uxPath;
@@ -2459,13 +2399,12 @@ ioGatherEntropy(char *buffer, sqInt bufSize)
 
 
 #if COGVM
-/*
- * Support code for Cog.
- * a) Answer whether the C frame pointer is in use, for capture of the C stack
- *    pointers.
- * b) answer the amount of stack room to ensure in a Cog stack page, including
- *    the size of the redzone, if any.
- */
+// Support code for Cog.
+// a) Answer whether the C frame pointer is in use, for capture of the C stack
+//    pointers.
+// b) answer the amount of headroom to ensure in a Cog stack page, including
+//    the size of the redzone, if any. This allows signal/interrupt delivery
+//    while executing jitted Smalltalk code.
 
 int
 isCFramePointerInUse(usqIntptr_t *cFrmPtrPtr, usqIntptr_t *cStkPtrPtr)
@@ -2478,31 +2417,41 @@ isCFramePointerInUse(usqIntptr_t *cFrmPtrPtr, usqIntptr_t *cStkPtrPtr)
 	return *cFrmPtrPtr >= *cStkPtrPtr && *cFrmPtrPtr <= currentCSP;
 }
 
-/* Answer an approximation of the size of the redzone (if any).  Do so by
- * sending a signal to the process and computing the difference between the
- * stack pointer in the signal handler and that in the caller. Assumes stacks
- * descend.
- */
+// Answer an approximation of the size of the redzone (if any).  Do so by
+// sending a signal to the process and computing the difference between the
+// stack pointer in the signal handler and that in the caller. Assumes stacks
+// descend.
+// In calculating the redzone size we must ensure that the signal sender is the
+// same thread as the signal catcher, otherwise we're measuring the distance
+// between thread stacks, not the distance between a stack frame and an
+// interrupt handler (!!).
 
 #if !defined(min)
 # define min(x,y) (((x)>(y))?(y):(x))
 #endif
+
 static char * volatile p = 0;
+static sqOSThread signalling_thread;
 
 static void
-sighandler(int sig, siginfo_t *info, void *uap)
-{ p = (char *)&sig; }
+sighandler(int sig)
+{
+	assert(ioOSThreadsEqual(signalling_thread,ioCurrentOSThread()));
+	p = (char *)&sig;
+}
 
 static int
 getRedzoneSize()
 {
 	struct sigaction handler_action, old;
-	handler_action.sa_sigaction = sighandler;
-	handler_action.sa_flags = SA_NODEFER | SA_SIGINFO;
+	handler_action.sa_handler = sighandler;
+	handler_action.sa_flags = SA_NODEFER;
 	sigemptyset(&handler_action.sa_mask);
 	(void)sigaction(SIGPROF, &handler_action, &old);
 
-	do kill(getpid(),SIGPROF); while (!p);
+	signalling_thread = ioCurrentOSThread();
+
+	do pthread_kill(signalling_thread,SIGPROF); while (!p);
 	(void)sigaction(SIGPROF, &old, 0);
 	return (char *)min(&old,&handler_action) - p;
 }
@@ -2510,12 +2459,12 @@ getRedzoneSize()
 sqInt reportStackHeadroom;
 static int stackPageHeadroom;
 
-/* Answer the redzone size plus space for any signal handlers to run in.
- * N.B. Space for signal handers may include space for the dynamic linker to
- * run in since signal handlers may reference other functions, and linking may
- * be lazy.  The reportheadroom switch can be used to check empirically that
- * there is sufficient headroom.
- */
+// Answer the redzone size plus space for any signal handlers to run in.
+// N.B. Space for signal handers may include space for the dynamic linker to
+// run in since signal handlers may reference other functions, and linking may
+// be lazy.  The reportheadroom switch can be used to check empirically that
+// there is sufficient headroom.
+
 int
 osCogStackPageHeadroom()
 {
@@ -2523,4 +2472,4 @@ osCogStackPageHeadroom()
 		stackPageHeadroom = getRedzoneSize() + 1024;
 	return stackPageHeadroom;
 }
-#endif /* COGVM */
+#endif // COGVM
