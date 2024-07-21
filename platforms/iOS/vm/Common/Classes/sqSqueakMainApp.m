@@ -241,6 +241,7 @@ printRegisterState(FILE *file,ucontext_t *uap)
 	return v(regs->__rip);
 # elif defined(__arm64__) || defined(__aarch64__)
 	_STRUCT_ARM_THREAD_STATE64 *regs = &uap->uc_mcontext->__ss;
+	_STRUCT_ARM_EXCEPTION_STATE64 *es = &uap->uc_mcontext->__es;
 #   define vr(r) v(regs->r)
 	fprintf(file,
 			"     x0 %14p  x1 %14p  x2 %14p  x3 %14p\n"
@@ -250,17 +251,17 @@ printRegisterState(FILE *file,ucontext_t *uap)
 			"    x16 %14p x17 %14p x18 %14p x19 %14p\n"
 			"    x20 %14p x21 %14p x22 %14p x23 %14p\n"
 			"    x24 %14p x25 %14p x26 %14p x27 %14p\n"
-			"    x28 %14p  fp %14p  lr %14p  sp %14p\n",
-			"     pc %14p cpsr 0x%08x\n",
-			vr( __x[0]), vr( __x[1]), vr( __x[2]), vr( __x[3]),
-			vr( __x[4]), vr( __x[5]), vr( __x[6]), vr( __x[7]),
-			vr( __x[8]), vr( __x[9]), vr(__x[10]), vr(__x[11]),
+			"    x28 %14p  fp %14p  lr %14p  sp %14p\n"
+			"     pc %14p cpsr 0x%08x fault addr %14p\n",
+			vr(__x[ 0]), vr(__x[ 1]), vr(__x[ 2]), vr(__x[ 3]),
+			vr(__x[ 4]), vr(__x[ 5]), vr(__x[ 6]), vr(__x[ 7]),
+			vr(__x[ 8]), vr(__x[ 9]), vr(__x[10]), vr(__x[11]),
 			vr(__x[12]), vr(__x[13]), vr(__x[14]), vr(__x[15]),
 			vr(__x[16]), vr(__x[17]), vr(__x[18]), vr(__x[19]),
 			vr(__x[20]), vr(__x[21]), vr(__x[22]), vr(__x[23]),
 			vr(__x[24]), vr(__x[25]), vr(__x[26]), vr(__x[27]),
 			vr(__x[28]), vr(__fp),    vr(__lr),    vr(__sp),
-			vr(__pc), regs->__cpsr);
+			vr(__pc), regs->__cpsr, v(es->__far));
 	return vr(__pc);
 #elif defined(__arm__) || defined(__arm32__)
 	_STRUCT_ARM_THREAD_STATE *regs = &uap->uc_mcontext->ss;
