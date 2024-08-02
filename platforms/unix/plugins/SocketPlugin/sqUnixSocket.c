@@ -83,7 +83,6 @@
 #   include <time.h>
 # endif
 # include <sys/param.h>
-# include <sys/stat.h>
 # include <sys/socket.h>
 # include <sys/ioctl.h>
 # include <net/if.h>
@@ -799,38 +798,49 @@ sqSocketListenOnPort(SocketPtr s, sqInt port)
 }
 
 void
-sqSocketListenOnPortBacklogSizeInterface(SocketPtr s, sqInt port, sqInt backlogSize, sqInt addr)
-{
-  struct sockaddr_in saddr;
+sqSocketListenOnPortBacklogSizeInterface(SocketPtr s, sqInt port, sqInt backlogSize, sqInt addr) {
+    struct sockaddr_in saddr;
 
-  if (!socketValid(s))
-	return;
+    if (!socketValid(s))
+        return;
 
-  /* only TCP sockets have a backlog */
-  if ((backlogSize > 1) && (s->socketType != TCPSocketType))
-	{
-	  success(false);
-	  return;
+    /* only TCP sockets have a backlog */
+    if ((backlogSize > 1)
+&& (s->socketType != TCPSocketType)) {
+        success(false);
+        return;
 	}
 
-  PSP(s)->multiListen= (backlogSize > 1);
-  FPRINTF((stderr, "listenOnPortBacklogSize(%d, %ld)\n", SOCKET(s), backlogSize));
-  memset(&saddr, 0, sizeof(saddr));
-  saddr.sin_family= AF_INET;
-  saddr.sin_port= htons((short)port);
-  saddr.sin_addr.s_addr= htonl(addr);
-  bind(SOCKET(s), (struct sockaddr*) &saddr, sizeof(saddr));
-  if (TCPSocketType == s->socketType)
-	{
-	  /* --- TCP --- */
-	  listen(SOCKET(s), backlogSize);
-	  SOCKETSTATE(s)= WaitingForConnection;
-	  aioEnable(SOCKET(s), PSP(s), 0);
-	  aioHandle(SOCKET(s), acceptHandler, AIO_RX); /* R => accept() */
+    PSP(s)->multiListen = (backlogSize > 1);
+    FPRINTF((stderr, "listenOnPortBacklogSize(%d, %ld)\n", SOCKET(s), backlogSize));
+    memset(&saddr, 0, sizeof(saddr));
+    saddr.sin_family = AF_INET;
+    saddr.sin_port = htons((short)port);
+    saddr.sin_addr.s_addr = htonl(addr);
+	if (0 != bind(SOCKET(s), (struct sockaddr*) &saddr, sizeof(saddr))) {
+        SOCKETSTATE(s) = Unconnected;
+        SOCKETERROR(s) = errno;
+        perror("sqSocketListenOnPortBacklogSizeInterface (bind)");
+        success(false);
+        return;
+  	}
+
+    if (TCPSocketType == s->socketType) {
+        /* --- TCP --- */
+        if (0 != listen(SOCKET(s), backlogSize)) {
+            SOCKETSTATE(s) = Unconnected;
+            SOCKETERROR(s) = errno;
+            perror("sqSocketListenOnPortBacklogSizeInterface (listen)");
+            success(false);
+            return;
+		}
+
+        SOCKETSTATE(s) = WaitingForConnection;
+        aioEnable(SOCKET(s), PSP(s), 0);
+        aioHandle(SOCKET(s), acceptHandler, AIO_RX); /* R => accept() */
 	}
-  else
-	{
-	  /* --- UDP/RAW --- */
+    else {
+        /* --- UDP/RAW --- */
 	}
 }
 
@@ -1777,23 +1787,19 @@ sqResolverGetAddressInfoHostSizeServiceSizeFlagsFamilyTypeProtocol
    && servSize < sizeof(((struct sockaddr_un *)0)->sun_path)
    && !(flags & SQ_SOCKET_NUMERIC))
 	{
-	  struct stat st;
-	  if (!stat(servName, &st) && (st.st_mode & S_IFSOCK))
-		{
-		  struct sockaddr_un *saun= calloc(1, sizeof(struct sockaddr_un));
-		  localInfo= (struct addrinfo *)calloc(1, sizeof(struct addrinfo));
-		  localInfo->ai_family= AF_UNIX;
-		  localInfo->ai_socktype= SOCK_STREAM;
-		  localInfo->ai_addrlen= sizeof(struct sockaddr_un);
-		  localInfo->ai_addr= (struct sockaddr *)saun;
-		  /*saun->sun_len= sizeof(struct sockaddr_un);*/
-		  saun->sun_family= AF_UNIX;
-		  memcpy(saun->sun_path, servName, servSize);
-		  saun->sun_path[servSize]= '\0';
-		  addrInfo= localInfo;
-		  interpreterProxy->signalSemaphoreWithIndex(resolverSema);
-		  return;
-		}
+	  struct sockaddr_un *saun= calloc(1, sizeof(struct sockaddr_un));
+	  localInfo= (struct addrinfo *)calloc(1, sizeof(struct addrinfo));
+	  localInfo->ai_family= AF_UNIX;
+	  localInfo->ai_socktype= SOCK_STREAM;
+	  localInfo->ai_addrlen= sizeof(struct sockaddr_un);
+	  localInfo->ai_addr= (struct sockaddr *)saun;
+	  /*saun->sun_len= sizeof(struct sockaddr_un);*/
+	  saun->sun_family= AF_UNIX;
+	  memcpy(saun->sun_path, servName, servSize);
+	  saun->sun_path[servSize]= '\0';
+	  addrInfo= localInfo;
+	  interpreterProxy->signalSemaphoreWithIndex(resolverSema);
+	  return;
 	}
 
   memset(&request, 0, sizeof(request));
