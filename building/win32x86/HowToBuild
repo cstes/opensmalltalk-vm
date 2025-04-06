@@ -79,8 +79,6 @@ Cygwin 1. Install the tools:
   either mingw 64bits version and msys from www.mingw.com.
 If installing Cygwin make sure you install the MinGW support, which is in the
 list of packages called "mingw64-i686-gcc-core,mingw64-i686-gcc-g++,mingw64-i686-headers,mingw64-i686-runtime".
-Note that the .appveyor.yml file may be used as example to automate installation of these tools.
-.appveyor.yml calls scripts/installCygwin.bat that you can use to build your own cygwin.
 
 Alternatively, an installation of mingw32 and msys may work, but has not been tested.
 
@@ -111,6 +109,7 @@ MSVC 1. Install the tools:
 - follow step Cygwin 1. Install the tools
 - Make sure that the tools directory (e.g., C:\cygwin\bin) is in your PATH environment variable
 - Install Visual Studio Community from https://visualstudio.microsoft.com/downloads/
+- Install a Windows Kit from https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/
 
 MSVC 2. Build
 Open a x86 Native Tools Command Prompt from Visual Studio.
@@ -156,9 +155,10 @@ If you want to get the Cog VM simulator working you'll need to build one or more
 of the processor simulator plugins, each of which has support libraries that
 must be built:
 	Processor   Plugin           Support Library
-	x86         BochsIA32Plugin  building/linux32x86/bochsx86
-	x86_64/x64  BochsX64Plugin   building/linux32x86/bochsx64
-	ARMv5       GdbARMPlugin     building/linux32x86/gdbarm32
+	x86         BochsIA32Plugin  building/win32x86/bochsx86
+	x86_64/x64  BochsX64Plugin   building/win32x86/bochsx64
+	ARMv5       GdbARMPlugin     building/win32x86/gdbarm32
+	ARMv8       GdbARM64Plugin   building/win32x86/gdbarm32
 cd to the relevant directories; run conf.COG and then the build script, e.g.
   $ cd building/linux32x86/bochsx86
   $ ./conf.COG

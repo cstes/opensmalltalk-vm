@@ -522,8 +522,23 @@ getAttributeString(sqInt id)
 		return imageName;
 	case 1001: // OS type: "unix", "win32", "mac", ...
 		return OS_TYPE;
-	case 1002: // OS name: e.g. "solaris2.5" on unix, "win95" on win32, ...
+	case 1002: { // OS name: e.g. "solaris2.5" on unix, "win95" on win32, ...
+#if OLD_1002_ATTRIBUTE
 		return VM_TARGET_OS;
+#else
+		static char *osName = 0;
+		struct utsname info;
+		if (osName)
+			return osName;
+		if (uname(&info) < 0)
+			return VM_TARGET_OS;
+		osName = malloc(strlen(info.sysname) + strlen(info.release) + 2);
+		strcpy(osName,info.sysname);
+		osName[strlen(info.sysname)] = ' ';
+		strcat(osName,info.release);
+		return osName;
+#endif
+	}
 	case 1003: // processor architecture: e.g. "68k", "x86", "PowerPC", ...
 		return VM_TARGET_CPU;
 	case 1004: // Interpreter version string
@@ -1078,8 +1093,8 @@ printRegisterState(FILE *file,ucontext_t *uap)
 			"    x16 %14p x17 %14p x18 %14p x19 %14p\n"
 			"    x20 %14p x21 %14p x22 %14p x23 %14p\n"
 			"    x24 %14p x25 %14p x26 %14p x27 %14p\n"
-			"    x29 %14p  fp %14p  lr %14p  sp %14p\n"
-			"     pc %14p pstate 0x%08x fault @ %14p\n",
+			"    x28 %14p  fp %14p  lr %14p  sp %14p\n"
+			"     pc %14p pstate 0x%08lx fault @ %14p\n",
 			v(regs[ 0]), v(regs[ 1]), v(regs[ 2]), v(regs[ 3]),
 			v(regs[ 4]), v(regs[ 5]), v(regs[ 6]), v(regs[ 7]),
 			v(regs[ 8]), v(regs[ 9]), v(regs[10]), v(regs[11]),
@@ -1094,10 +1109,10 @@ printRegisterState(FILE *file,ucontext_t *uap)
 # elif __linux__ && (defined(__arm__) || defined(__arm32__) || defined(ARM32))
 	struct sigcontext *regs = (struct sigcontext *)&uap->uc_mcontext;
 	fprintf(file,
-			"\t r0 0lx%08lx r1 0lx%08lx r2 0lx%08lx r3 0lx%08lx\n"
-	        "\t r4 0lx%08lx r5 0lx%08lx r6 0lx%08lx r7 0lx%08lx\n"
-	        "\t r8 0lx%08lx r9 0lx%08lx r10 0lx%08lx fp 0lx%08lx\n"
-	        "\t ip 0lx%08lx sp 0lx%08lx lr 0lx%08lx pc 0lx%08lx\n",
+			"\t r0 0x%08lx r1 0x%08lx r2 0x%08lx r3 0x%08lx\n"
+	        "\t r4 0x%08lx r5 0x%08lx r6 0x%08lx r7 0x%08lx\n"
+	        "\t r8 0x%08lx r9 0x%08lx rA 0x%08lx fp 0x%08lx\n"
+	        "\t ip 0x%08lx sp 0x%08lx lr 0x%08lx pc 0x%08lx\n",
 	        regs->arm_r0,regs->arm_r1,regs->arm_r2,regs->arm_r3,
 	        regs->arm_r4,regs->arm_r5,regs->arm_r6,regs->arm_r7,
 	        regs->arm_r8,regs->arm_r9,regs->arm_r10,regs->arm_fp,
@@ -1823,7 +1838,15 @@ vm_printUsage(void)
 	option("  "VMOPTION("failonffiexception")"   when in an FFI callout primitive catch exceptions and fail the primitive\n");
 	option("  "VMOPTION("breakmnu")" selector    set breakpoint on MNU of selector\n");
 	option("  "VMOPTION("eden")" <size>[kmg]     use given eden size\n");
-	option("  "VMOPTION("leakcheck")" num        check for leaks in the heap\n");
+	option("  "VMOPTION("leakcheck")"=flags      check for leaks in the heap\n");
+	{ extern const char *leakCheckFlagsMeanings[];
+		i = 0;
+		while (leakCheckFlagsMeanings[i]) {
+			extendOption("    ");
+			extendOption(leakCheckFlagsMeanings[i++]);
+			extendOption("\n");
+		}
+	}
 	option("  "VMOPTION("stackpages")" <num>     use given number of stack pages\n");
 #endif
 	option("  "VMOPTION("noevents")"             disable event-driven input support\n");
@@ -1955,6 +1978,11 @@ getVersionInfo(int verbose)
 #else
 # define INTERP_BUILD interpreterVersion
 #endif
+#if COGMTVM
+# define VM "MTVM"
+#else
+# define VM "VM"
+#endif
   extern char *revisionAsString();
   extern char *vm_date, *cc_version, *ux_version;
   char *info = (char *)malloc(8192);
@@ -1989,7 +2017,7 @@ getVersionInfo(int verbose)
 #if defined(USE_XSHM)
   sprintf(info+strlen(info), " XShm");
 #endif
-  sprintf(info+strlen(info), " %s %s [" BuildVariant HBID " %s VM]\n", vm_date, cc_version, getAttributeString(1003)); // 1003 == processor
+  sprintf(info+strlen(info), " %s %s [" BuildVariant HBID " %s " VM "]\n", vm_date, cc_version, getAttributeString(1003)); // 1003 == processor
   if (verbose)
     sprintf(info+strlen(info), "Built from: ");
   sprintf(info+strlen(info), "%s\n", INTERP_BUILD);

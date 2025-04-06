@@ -192,7 +192,6 @@ int ioDrainEventQueue(void);
 #endif
 
 extern sqInt byteSwapped(sqInt);
-extern int convertToSqueakTime(SYSTEMTIME);
 static int recordMouseDown(WPARAM, LPARAM);
 static int recordModifierButtons();
 static int recordKeystroke(UINT,WPARAM,LPARAM);
@@ -1491,11 +1490,11 @@ ioSetInputSemaphore(sqInt semaIndex)
 sqInt
 ioGetNextEvent(sqInputEvent *evt)
 {
-  if (eventBufferGet == eventBufferPut)
+  if (eventBufferGet == eventBufferPut) {
     ioProcessEvents();
-  if (eventBufferGet == eventBufferPut)
-    return 1;
-
+	if (eventBufferGet == eventBufferPut)
+      return 0;
+  }
   *evt = eventBuffer[eventBufferGet];
   eventBufferGet = (eventBufferGet+1) % MAX_EVENT_BUFFER;
   return 1;
@@ -1788,29 +1787,34 @@ static thisGetDpiForMonitor_t thisGetDpiForMonitor = NULL;
 /*
  * Per-system DPI (for Windows < 8.1)
  */
-static double getDpiSystem(void)
+static double
+getDpiSystem(void)
 {
   double dpi;
   HDC dc = GetWindowDC(stWindow);
-  if (!dc) return 0.0; /* fail */
+  if (!dc)
+	return 0.0; /* fail */
   dpi = (double) GetDeviceCaps(dc, LOGPIXELSY);
   ReleaseDC(stWindow,dc);
   return dpi;
 }
 
 
-static double getDpiMonitor(void)
+static double
+getDpiMonitor(void)
 {
   UINT hdpi = 0, vdpi = 0;
   HMONITOR hMonitor = NULL;
 
-  if (!thisGetDpiForMonitor) { return 0.0; }
+  if (!thisGetDpiForMonitor)
+	return 0.0;
 
-  if ((hMonitor = MonitorFromWindow(stWindow, MONITOR_DEFAULTTONULL))) {
-    if (thisGetDpiForMonitor(hMonitor, thisMDT_EFFECTIVE_DPI, &hdpi, &vdpi) == S_OK && hdpi > 0 && vdpi > 0) {
-      return (double) vdpi;
-    }
-  }
+  if ((hMonitor = MonitorFromWindow(stWindow, MONITOR_DEFAULTTONULL))
+   && thisGetDpiForMonitor(hMonitor, thisMDT_EFFECTIVE_DPI, &hdpi, &vdpi) == S_OK
+   && hdpi > 0
+   && vdpi > 0)
+	return vdpi;
+
   return 0.0;
 }
 
@@ -1818,37 +1822,36 @@ static double getDpiMonitor(void)
  * Expected to be called only once.
  * But I'm just a function, not a cop.
  */
-getDpi_t determineGetDpiFunction(void)
+getDpi_t
+determineGetDpiFunction(void)
 {
   HMODULE shcore = NULL;
   if (IsWindows8Point1OrGreater()) {
-    if (thisGetDpiForMonitor) {
+    if (thisGetDpiForMonitor)
       return getDpiMonitor;
-    } else {
-      // Ensure GetDpiForMonitor (And shcore.dll) is there, else use fallback.
-      if ((shcore = LoadLibrary("Shcore.dll"))) {
-        if ((thisGetDpiForMonitor = (thisGetDpiForMonitor_t)GetProcAddress(shcore, "GetDpiForMonitor"))) {
-          return getDpiMonitor;
-        }
-      }
-    }
+	// Ensure GetDpiForMonitor (And shcore.dll) is there, else use fallback.
+	if ((shcore = LoadLibraryA("Shcore.dll"))
+	 && (thisGetDpiForMonitor = (thisGetDpiForMonitor_t)GetProcAddress(shcore, "GetDpiForMonitor")))
+	  return getDpiMonitor;
   }
   return getDpiSystem;
 }
 
 const double BASE_DPI = 96.0;
 
-double ioScreenScaleFactor(void)
+double
+ioScreenScaleFactor(void)
 {
   static getDpi_t getDpi = NULL;
-  if (!getDpi) { getDpi = determineGetDpiFunction(); }
+  if (!getDpi)
+	getDpi = determineGetDpiFunction();
 
   double physicalDpi = getDpi();
   if (fabs(BASE_DPI - physicalDpi) > DBL_EPSILON) {
     double apparentFactor = physicalDpi / BASE_DPI;
     return apparentFactor > DBL_EPSILON ? apparentFactor : nan("MISS");
   }
-  return 1.0 ;
+  return 1.0;
 }
 
 /* returns the size of the Squeak window */
@@ -2150,25 +2153,22 @@ int
 copy_image_words(unsigned int *dst, unsigned int *src,
 		     int depth, int width, RECT *rect)
 {
-  int pitch, first, last, nWords, delta, yy;
+  int pitch, first, last, nWords, yy;
 
   /* note: all  of the below are in DWORDs not BYTEs */
   pitch = ((width * depth) + 31) / 32;
   first = (rect->left * depth) / 32;
   last  = ((rect->right * depth) + 31) / 32;
   nWords = last - first;
-  delta = pitch - nWords;
   if (nWords <= 0) return 1;
 
   {/* the inner loop */
-    DWORD* srcPixPtr;
-    DWORD* dstPixPtr;
-    srcPixPtr = ((DWORD*)src) + (rect->top * pitch) + first;
-    dstPixPtr = ((DWORD*)dst) + (rect->top * pitch) + first;
-    for (yy = rect->top; yy < rect->bottom;
-	yy++, srcPixPtr += pitch, dstPixPtr += pitch) {
+    DWORD *srcPixPtr = ((DWORD*)src) + (rect->top * pitch) + first;
+    DWORD *dstPixPtr = ((DWORD*)dst) + (rect->top * pitch) + first;
+    for (yy = rect->top;
+		 yy < rect->bottom;
+		 yy++, srcPixPtr += pitch, dstPixPtr += pitch)
       memcpy(dstPixPtr, srcPixPtr, nWords*4);
-    }
   }
   return 1;
 }
@@ -3185,19 +3185,16 @@ HideSplashScreen(void)
 # define VMOPTION(arg) "-"arg
 # define TVMOPTION(arg) TEXT("-") TEXT(arg)
 # if _UNICODE
-static TCHAR *
-asTCharString(char *charString)
-{
-	int len = MultiByteToWideChar(CP_UTF8, 0, charString, -1, NULL, 0);
-	if (len <= 0)
-		return 0; /* invalid UTF8 ? */
-	LPWSTR tcharString = malloc(len*sizeof(WCHAR));
-	if (MultiByteToWideChar(CP_UTF8, 0, charString, -1, tcharString, len) == 0)
-		return 0;
-	return tcharString;
-}
+# define toTCharString(charString,tcharString)								\
+	len = MultiByteToWideChar(CP_UTF8, 0, charString, -1, NULL, 0);			\
+	if (len <= 0)															\
+		tcharString = 0; /* invalid UTF8 ? */								\
+	else {																	\
+		tcharString = alloca(len*sizeof(WCHAR));							\
+		MultiByteToWideChar(CP_UTF8, 0, charString, -1, tcharString, len);	\
+	}
 # else
-#	define asTCharString(charString) charString
+#	define toTCharString(charString,tcharString) tcharString = charString
 # endif
 
 /* print usage with different output levels */
@@ -3209,16 +3206,34 @@ printUsage(int level)
       abortMessage(TEXT("Usage: ") TEXT(VM_NAME) TEXT(" [options] <imageFile>\n"));
       break;
     case 1: { // full usage
-#if COGVM
-	  char traceFlags[1024];
-	  extern const char *traceFlagsMeanings[];
-	  bzero(traceFlags,1024);
-	  int i = 0;
-	  while (traceFlagsMeanings[i]) {
-		strcat(traceFlags, "\n\t\t");
-		strcat(traceFlags, traceFlagsMeanings[i]);
+#if STACKVM
+# define N 512
+	  int i = 0, len;
+	  char concatenation[N];
+
+	  TCHAR *leakCheckFlags;
+	  extern const char *leakCheckFlagsMeanings[];
+	  bzero(concatenation,N);
+	  i = 0;
+	  while (leakCheckFlagsMeanings[i]) {
+		strcat(concatenation, "\n\t\t");
+		strcat(concatenation, leakCheckFlagsMeanings[i]);
 		++i;
 	  }
+	  toTCharString(concatenation,leakCheckFlags);
+# if COGVM
+	  TCHAR *traceFlags;
+	  extern const char *traceFlagsMeanings[];
+	  bzero(concatenation,N);
+	  i = 0;
+	  while (traceFlagsMeanings[i]) {
+		strcat(concatenation, "\n\t\t");
+		strcat(concatenation, traceFlagsMeanings[i]);
+		++i;
+	  }
+	  toTCharString(concatenation,traceFlags);
+# endif
+# undef N
 #endif
       abortMessage(TEXT("Usage: ") TEXT(VM_NAME) TEXT(" [vmOptions] imageFile [imageOptions]\n\n")
                    TEXT("vmOptions:")
@@ -3231,9 +3246,8 @@ printUsage(int level)
                    TEXT("\n\t") TVMOPTION("breaksel:") TEXT(" string \t(call warning on send of sel for debug)")
 #endif /* STACKVM || NewspeakVM */
 #if STACKVM
-                   TEXT("\n\t") TVMOPTION("failonffiexception") TEXT("\t(when in an FFI callout primitive catch exceptions and fail the primitive)")
                    TEXT("\n\t") TVMOPTION("breakmnu:") TEXT(" string \t(call warning on MNU of sel for debug)")
-                   TEXT("\n\t") TVMOPTION("leakcheck:") TEXT(" n \t\t(leak check on GC (1=full,2=incr,3=both))")
+                   TEXT("\n\t") TVMOPTION("leakcheck:") TEXT(" flags \t(leak check on GC etc)%s")
                    TEXT("\n\t") TVMOPTION("eden:") TEXT(" bytes \t\t(set eden memory size to bytes)")
                    TEXT("\n\t") TVMOPTION("stackpages:") TEXT(" n \t\t(use n stack pages)")
                    TEXT("\n\t") TVMOPTION("numextsems:") TEXT(" n \t\t(allow up to n external semaphores)")
@@ -3247,7 +3261,7 @@ printUsage(int level)
                    TEXT("\n\t") TVMOPTION("sendtrace") TEXT(" \t\t(trace sends to stdout for debug)")
 # endif
                    TEXT("\n\t") TVMOPTION("warnpid") TEXT("   \t\t(print pid in warnings)")
-                   TEXT("\n\t") TVMOPTION("[no]failonffiexception") TEXT("   \t\t([never]always catch exceptions in FFI calls)")
+                   TEXT("\n\t") TVMOPTION("[no]failonffiexception") TEXT("   ([never]always catch exceptions in FFI calls)")
 #endif
 #if COGVM
                    TEXT("\n\t") TVMOPTION("codesize:") TEXT(" bytes \t(set machine-code memory size to bytes)")
@@ -3262,8 +3276,11 @@ printUsage(int level)
 #endif
                    TEXT("\n") TEXT("Options begin with single -, but -- prefix is silently accepted")
                    TEXT("\n") TEXT("Options with arguments -opt:n are also accepted with separators -opt n")
-#if COGVM
-					, asTCharString(traceFlags)
+#if STACKVM
+					, leakCheckFlags
+# if COGVM
+					, traceFlags
+# endif
 #endif
                    );
 	  }
