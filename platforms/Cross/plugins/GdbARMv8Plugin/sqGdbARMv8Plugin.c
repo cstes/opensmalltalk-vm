@@ -36,9 +36,9 @@ static char	gdb_log[LOGSIZE+1];
 static int	gdblog_index = 0;
 
 static unsigned char *theMemory = 0;
-static unsigned long  theMemorySize;
-static unsigned long  minReadAddress;
-static unsigned long  minWriteAddress;
+static uintptr_t      theMemorySize;
+static uintptr_t      minReadAddress;
+static uintptr_t      minWriteMaxExecuteAddress;
 static int            theErrorAcorn;
 static int            continueRunning;
 
@@ -79,16 +79,17 @@ resetCPU(void *cpu)
 #define run 0
 #define step 1
 
+// See comments in platforms/Cross/plugins/ProcessorSimulatorPlugin.h
 static inline long
 runOnCPU(sim_cpu *cpu, void *memory, 
 		uintptr_t byteSize, uintptr_t minAddr, uintptr_t minWriteMaxExecAddr, int runOrStep)
 {
-	uint64_t postpc = cpu->pc + sizeof(cpu->instr);
+	uint64_t prevpc, postpc = cpu->pc + sizeof(cpu->instr);
 
 	theMemory = (unsigned char *)memory;
 	theMemorySize = byteSize;
 	minReadAddress = minAddr;
-	minWriteAddress = minWriteMaxExecAddr;
+	minWriteMaxExecuteAddress = minWriteMaxExecAddr;
 	theErrorAcorn = 0;
 
 	if ((theErrorAcorn = setjmp(error_abort)) != 0)
@@ -98,24 +99,29 @@ runOnCPU(sim_cpu *cpu, void *memory,
 	gdblog_index = 0;
 
 	if (runOrStep == step) {
-		if (postpc <= minWriteMaxExecAddr
-		 && aarch64_step(cpu)
-		 && cpu->nextpc <= minWriteMaxExecAddr)
-			cpu->pc = cpu->nextpc;
+		if (postpc < byteSize
+		 && (prevpc = cpu->pc, aarch64_step(cpu))) {
+			if (cpu->pc >= byteSize)
+				cpu->pc = prevpc;
+			else if (cpu->nextpc < byteSize)
+				cpu->pc = cpu->nextpc;
+		}
 	}
 	else {
 		continueRunning = 1;
 		while (continueRunning
 			&& postpc <= minWriteMaxExecAddr
-			&& aarch64_step(cpu)
+			&& (prevpc = cpu->pc, aarch64_step(cpu))
 			&& !gdblog_index) {
-			if (cpu->nextpc <= minWriteMaxExecAddr)
+			if (cpu->pc >= byteSize)
+				cpu->pc = prevpc;
+			else if (cpu->nextpc < byteSize)
 				cpu->pc = cpu->nextpc;
 			postpc = cpu->nextpc + sizeof(cpu->instr);
 		}
 	}
-	if (postpc > minWriteMaxExecAddr
-	 || cpu->nextpc > minWriteMaxExecAddr)
+	if (postpc >= minWriteMaxExecAddr
+	 || cpu->nextpc >= minWriteMaxExecAddr)
 		return InstructionPrefetchError;
 
 #if 0
@@ -131,6 +137,7 @@ runOnCPU(sim_cpu *cpu, void *memory,
 	return gdblog_index == 0 ? 0 : SomethingLoggedError;
 }
 
+// See comments in platforms/Cross/plugins/ProcessorSimulatorPlugin.h
 long
 singleStepCPUInSizeMinAddressReadWrite(void *cpu, void *memory, 
 		uintptr_t byteSize, uintptr_t minAddr, uintptr_t minWriteMaxExecAddr)
@@ -138,6 +145,7 @@ singleStepCPUInSizeMinAddressReadWrite(void *cpu, void *memory,
 	return runOnCPU(cpu, memory, byteSize, minAddr, minWriteMaxExecAddr, step);
 }
 
+// See comments in platforms/Cross/plugins/ProcessorSimulatorPlugin.h
 long
 runCPUInSizeMinAddressReadWrite(void *cpu, void *memory, 
 		uintptr_t byteSize, uintptr_t minAddr, uintptr_t minWriteMaxExecAddr)
@@ -172,6 +180,9 @@ gdb_log_printf(void *stream, const char * format, ...)
 	return 0;
 }
 
+static int dis_initialized = 0;
+static disassemble_info dis;
+
 long
 disassembleForAtInSizePrintAddress(void *cpu, uintptr_t laddr,
 			void *memory, uintptr_t byteSize, int printAddress)
@@ -181,28 +192,32 @@ disassembleForAtInSizePrintAddress(void *cpu, uintptr_t laddr,
 	// start disassembling at laddr relative to memory
 	// stop disassembling at memory+byteSize
 
-	disassemble_info* dis = (disassemble_info*) calloc(1, sizeof(disassemble_info));
-	// void init_disassemble_info (struct disassemble_info *dinfo, void *stream, fprintf_ftype fprintf_func)
-	init_disassemble_info ( dis, NULL, gdb_log_printf);
+	if (!dis_initialized) {
+		memset(&dis, 0, sizeof(dis));
 
-	dis->arch = bfd_arch_aarch64;
+		// void init_disassemble_info (struct disassemble_info *dinfo, void *stream, fprintf_ftype fprintf_func)
+		init_disassemble_info ( &dis, NULL, gdb_log_printf);
+
+		dis.arch = bfd_arch_aarch64;
 #if 0
-	dis->mach = bfd_mach_aarch64_unknown;
+		dis.mach = bfd_mach_aarch64_unknown;
 #endif
 
-	// sets some fields in the structure dis to architecture specific values
-	disassemble_init_for_target( dis );
+		// sets some fields in the structure dis to architecture specific values
+		disassemble_init_for_target( &dis );
 
-	dis->buffer_vma = 0;
-	dis->buffer = memory;
-	dis->buffer_length = byteSize;
+		dis_initialized = 1;
+	}
 
 	if (printAddress)
 		gdb_log_printf( NULL, "%08lx: ", laddr);
-	//other possible functions are listed in opcodes/dissassemble.c
-	unsigned int size = print_insn_aarch64((bfd_vma) laddr, dis);
 
-	free(dis);
+	dis.buffer_vma = 0;
+	dis.buffer = memory;
+	dis.buffer_length = byteSize;
+	//other possible functions are listed in opcodes/dissassemble.c
+	unsigned int size = print_insn_aarch64((bfd_vma) laddr, &dis);
+
 	gdb_log[gdblog_index+1] = 0;
 
 	return size;
@@ -273,7 +288,7 @@ aarch64_get_mem_long_double (sim_cpu *cpu, uint64_t address, FRegister *a)
   void																	\
   aarch64_set_mem_##NAME (sim_cpu *cpu, uint64_t address, TYPE value)	\
   {																		\
-	if (address < minWriteAddress										\
+	if (address < minWriteMaxExecuteAddress								\
 	 || address + N > theMemorySize)									\
 		longjmp(error_abort,MemoryBoundsError);							\
 	memcpy(theMemory + address, &value, N);								\
@@ -291,7 +306,7 @@ STORE_FUNC( int8_t,   s8, 1)
 void
 aarch64_set_mem_long_double (sim_cpu *cpu, uint64_t address, FRegister a)
 {
-	if (address < minWriteAddress
+	if (address < minWriteMaxExecuteAddress
 	 || address + 16 > theMemorySize)
 		longjmp(error_abort,MemoryBoundsError);
 	memcpy(theMemory + address, &a, 16);
