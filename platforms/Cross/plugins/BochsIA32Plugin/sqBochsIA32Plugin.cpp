@@ -97,11 +97,12 @@ resetSegmentRegisters(uintptr_t byteSize, uintptr_t minWriteMaxExecAddr)
 	bx_cpu.sregs[BX_SEG_REG_SS].cache.u.segment.limit = byteSize >> 16;
 }
 
-#define initEipFetchPtr(cpup) ((cpup)->eipFetchPtr = theMemory)
-#define resetInstructionFetch(cpup) do { \
-		(cpup)->eipPageBias = (bx_address)0; \
-		(cpup)->eipPageWindowSize = minWriteMaxExecAddr; } while (0)
+#define resetInstructionFetch(cpup,mem,maxaddr) do {\
+		(cpup)->eipFetchPtr = (const Bit8u *)mem;					\
+		(cpup)->eipPageBias = (bx_address)0;		\
+		(cpup)->eipPageWindowSize = maxaddr; } while (0)
 
+	// See comments in platforms/Cross/plugins/ProcessorSimulatorPlugin.h
 	long
 	singleStepCPUInSizeMinAddressReadWrite(void *cpu,
 									void *memory, uintptr_t byteSize,
@@ -122,8 +123,7 @@ resetSegmentRegisters(uintptr_t byteSize, uintptr_t minWriteMaxExecAddr)
 
 		blidx = 0;
 		resetSegmentRegisters(byteSize, minWriteMaxExecAddr);
-		initEipFetchPtr(anx86);
-		resetInstructionFetch(anx86);
+		resetInstructionFetch(anx86,memory,byteSize);
 
 		anx86->cpu_single_step();
 		anx86->force_flags();
@@ -131,6 +131,7 @@ resetSegmentRegisters(uintptr_t byteSize, uintptr_t minWriteMaxExecAddr)
 		return blidx == 0 ? 0 : SomethingLoggedError;
 	}
 
+	// See comments in platforms/Cross/plugins/ProcessorSimulatorPlugin.h
 	long
 	runCPUInSizeMinAddressReadWrite(void *cpu, void *memory, uintptr_t byteSize,
 									uintptr_t minAddr, uintptr_t minWriteMaxExecAddr)
@@ -146,8 +147,7 @@ resetSegmentRegisters(uintptr_t byteSize, uintptr_t minWriteMaxExecAddr)
 
 		blidx = 0;
 		resetSegmentRegisters(byteSize, minWriteMaxExecAddr);
-		initEipFetchPtr(anx86);
-		resetInstructionFetch(anx86);
+		resetInstructionFetch(anx86,memory,byteSize);
 
 		bx_pc_system.kill_bochs_request = 0;
 		anx86->cpu_loop(0 /* = "run forever" until exception or interupt */);
@@ -176,13 +176,14 @@ resetSegmentRegisters(uintptr_t byteSize, uintptr_t minWriteMaxExecAddr)
 	disassembleForAtInSizePrintAddress(void *cpu, uintptr_t laddr,
 				void *memory, uintptr_t byteSize, int printAddress)
 	{
+		extern int printInstructionBytes;
 		BX_CPU_C *anx86 = (BX_CPU_C *)cpu;
 
 		Bit8u  instr_buf[16];
-		size_t i=0;
+		size_t i = 0;
 
-		static char letters[] = "0123456789ABCDEF";
 		static disassembler bx_disassemble;
+		static int syntax_set = 0;
 		long remainsInPage = byteSize - laddr;
 
 		if (remainsInPage < 0) {
@@ -190,28 +191,37 @@ resetSegmentRegisters(uintptr_t byteSize, uintptr_t minWriteMaxExecAddr)
 			return -MemoryBoundsError;
 		}
 
-		memcpy(instr_buf, (char *)memory + laddr, min(15,byteSize - laddr));
+		memcpy(instr_buf, (char *)memory + laddr, min(15,remainsInPage));
 		if (printAddress)
-			i = sprintf(bochs_log, "%08lx: ", laddr);
-		bx_disassemble.set_syntax_att();
+			i = snprintf(bochs_log, LOGSIZE, "%08lx: ", laddr);
+		if (!syntax_set) {
+			bx_disassemble.set_syntax_att();
+			syntax_set = 1;
+		}
 		unsigned isize = bx_disassemble.disasm(
 							anx86->sregs[BX_SEG_REG_CS].cache.u.segment.d_b,
 							anx86->cpu_mode == BX_MODE_LONG_64,
 							anx86->get_segment_base(BX_SEG_REG_CS), laddr,
 							instr_buf,
-							bochs_log+i);
-		if (isize <= remainsInPage) {
-		  i=strlen(bochs_log);
-		  bochs_log[i++] = ' ';
-		  bochs_log[i++] = ':';
-		  bochs_log[i++] = ' ';
-		  for (unsigned j=0; j<isize; j++) {
-			bochs_log[i++] = letters[(instr_buf[j] >> 4) & 0xf];
-			bochs_log[i++] = letters[(instr_buf[j] >> 0) & 0xf];
-			bochs_log[i++] = ' ';
-		  }
+							bochs_log + i);
+		if (printInstructionBytes) {
+			if (isize <= remainsInPage) {
+			  static char letters[] = "0123456789ABCDEF";
+			  i = strlen(bochs_log);
+			  bochs_log[i++] = ' ';
+			  bochs_log[i++] = ':';
+			  bochs_log[i++] = ' ';
+			  for (unsigned j=0; j<isize; j++) {
+				bochs_log[i++] = letters[(instr_buf[j] >> 4) & 0xf];
+				bochs_log[i++] = letters[(instr_buf[j] >> 0) & 0xf];
+				bochs_log[i++] = ' ';
+			  }
+			  bochs_log[blidx = i] = 0;
+			}
 		}
-		bochs_log[blidx = i] = 0;
+		else
+			blidx = strlen(bochs_log);
+
 		return isize;
 	}
 
@@ -248,6 +258,15 @@ resetSegmentRegisters(uintptr_t byteSize, uintptr_t minWriteMaxExecAddr)
 		registerState[7] = bx_cpu.gen_reg[BX_32BIT_REG_EDI].dword.erx;
 		registerState[8] = bx_cpu.gen_reg[BX_32BIT_REG_EIP].dword.erx;
 		registerState[9] = bx_cpu.eflags;
+	}
+
+	void
+	probeIfetch(Bit32u ip)
+	{
+		if (ip >= minWriteAddress) {
+			theErrorAcorn = InstructionPrefetchError;
+			longjmp(bx_cpu.jmp_buf_env,InstructionPrefetchError);
+		}
 	}
 } // extern "C"
 
