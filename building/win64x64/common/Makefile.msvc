@@ -268,19 +268,13 @@ ifneq ($(EXTERNAL_PLUGINS),)
 endif
 
 #############################################################################
-# The exports for named primitives from Squeak (required by VM)
-#
-$(VMDEF) $(VMLIB): $(VMOBJ)
-	$(DLLTOOL) --input-def $(VMDEFIN) --output-def $(OBJDIR)/$(VMDEF) --output-lib $(OBJDIR)/$(VMLIB) $(VMOBJ)
-
-#############################################################################
 # Building plugins
 #
 
 .PHONY: $(OBJDIR)/%.lib $(OBJDIR)/%.dll
 .PHONY: always
 # Check for Makefile in win32 plugins directory otherwise use default Makefile
-plugin-makefile = $(realpath $(firstword $(wildcard $(WIN32PLUGINSDIR)/$(1)/Makefile.msvc ../common/Makefile.msvc.plugin)))
+plugin-makefile = $(realpath $(firstword $(wildcard $(WIN32PLUGINSDIR)/$(1)/Makefile.msvc.plugin ../common/Makefile.msvc.plugin)))
 
 # Internal plugin.  Build as lib then link in lib
 $(OBJDIR)/%.lib: always
