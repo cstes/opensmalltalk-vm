@@ -5,8 +5,27 @@ INSTALLDIR=sqcogspur64ARMv8linuxht
 # armv8.N-a all fail in signalSemaphoreWithIndex for N in 1,2,3,4,5
 # tpr - add enablementisation of fast bitblt ben avison code
 MACHINE="-march=armv8-a -mtune=cortex-a72"
-OPT="-g -O2 -DNDEBUG -DDEBUGVM=0 -DMUSL -D_GNU_SOURCE -DUSEEVDEV"
-##OPT="-g -O3 -DNDEBUG -DDEBUGVM=0"
+OPT="-g -O2 -DNDEBUG -DDEBUGVM=0 -D_GNU_SOURCE -DUSEEVDEV"
+##OPT="-g -O3  -DMUSL -DNDEBUG -DDEBUGVM=0"
+
+if [ `uname` = "OpenBSD" ]; then
+    DUALMAP="-DDUAL_MAPPED_CODE_ZONE=0"
+# librt and libpthread functions now supplied by libc.
+# Many Linux systems supply empty library files but
+# OpenBSD does not.
+    LIBRT=""
+# OpenBSD has problems with fast-bitblt under gcc and clang
+    FASTBITBLT=""
+# Prefer clang over gcc if available
+    if [ -n "$(command -v clang || true)" ]; then CC=clang; else CC=gcc; fi
+else # non-OpenBSD Linux
+    DUALMAP="-DDUAL_MAPPED_CODE_ZONE=1"
+    LIBRT="-lrt"
+# Linux on ARMv8 properly compiles fast-bitblt under gcc
+# but compiles-and-segfaults with clang. Use gcc for now.
+	FASTBITBLT=" --enable-fast-bitblt "
+	CC=gcc
+fi
 
 if [ $# -ge 1 ]; then
 	INSTALLDIR="$1"; shift
@@ -23,10 +42,10 @@ test -f config.h || ../../../../platforms/unix/config/configure \
 	--with-vmversion=5.0 --with-src=src/spur64.cog \
 	--without-npsqueak \
 	--with-scriptname=spur64 \
-	--enable-fast-bitblt \
-	CC=clang \
-	CFLAGS="$MACHINE $OPT -DCOGMTVM=0 -DDUAL_MAPPED_CODE_ZONE=1" \
-	LIBS="-lrt"
+	$FASTBITBLT \
+	CC=$CC \
+	CFLAGS="$MACHINE $OPT -DCOGMTVM=0 $DUALMAP" \
+	LIBS=$LIBRT
 ##	--without-vm-display-fbdev --without-npsqueak \
 rm -f vm/sqUnixMain.o # nuke version info
 rm -rf ../../../../products/$INSTALLDIR

@@ -1369,14 +1369,22 @@ void BX_CPP_AttrRegparmN(1) BX_CPU_C::RDPMC(bxInstruction_c *i)
 #if BX_CPU_LEVEL >= 5
 BX_CPP_INLINE Bit64u BX_CPU_C::get_TSC(void)
 {
+#if COG
+  return BX_CPU_THIS_PTR timeStampCounter;
+#else
   return bx_pc_system.time_ticks() - BX_CPU_THIS_PTR msr.tsc_last_reset;
+#endif
 }
 
 void BX_CPU_C::set_TSC(Bit64u newval)
 {
   // compute the correct setting of tsc_last_reset so that a get_TSC()
   // will return newval
+#if COG
+  BX_CPU_THIS_PTR timeStampCounter = newval;
+#else
   BX_CPU_THIS_PTR msr.tsc_last_reset = bx_pc_system.time_ticks() - newval;
+#endif
 
   // verify
   BX_ASSERT (get_TSC() == newval);
