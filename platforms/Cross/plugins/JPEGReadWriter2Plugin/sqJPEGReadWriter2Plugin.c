@@ -7,7 +7,7 @@
  *
  *	All rights reserved.
  *   
- *   This file is part of Squeak.
+ *   This file is part of OpenSmalltalk-VM.
  * 
  *   Permission is hereby granted, free of charge, to any person obtaining a
  *   copy of this software and associated documentation files (the "Software"),
@@ -29,6 +29,7 @@
  */
 #include <stdio.h> /* abs */
 #include <stdlib.h> /* abs */
+#include "sqSetjmpShim.h"
 #include "JPEGReadWriter2Plugin.h"
 
 /*
@@ -322,5 +323,5 @@ void
 error_exit (j_common_ptr cinfo)
 {
   /* cinfo->err really points to a error_mgr2 struct, so coerce the pointer */
-  longjmp(*((error_ptr2)(cinfo->err))->setjmp_buffer, 1);
+  _longjmp(*((error_ptr2)(cinfo->err))->setjmp_buffer, 1);
 }
