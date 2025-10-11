@@ -18,8 +18,9 @@
 
 #include <stdlib.h> /* for valloc */
 #include <string.h> /* for memcpy et al */
-#include <setjmp.h>
 #include <stdio.h> /* for fprintf(stderr,...) */
+
+#include "sqSetjmpShim.h"
 
 #include "objAccess.h"
 #include "vmCallback.h"
@@ -40,7 +41,7 @@ struct VirtualMachine* interpreterProxy;
 #ifdef _MSC_VER
 # define alloca _alloca
 #endif
-#if __GNUC__
+#if __GNUC__ || __clang__
 # define setsp(sp) __asm__ volatile ("movq %0,%%rsp" : : "m"(sp))
 # define getsp() ({ void *sp; __asm__ volatile ("movq %%rsp,%0" : "=r"(sp) : ); sp;})
 #endif

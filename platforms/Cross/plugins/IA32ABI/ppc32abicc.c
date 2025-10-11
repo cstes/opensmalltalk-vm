@@ -60,10 +60,12 @@ void *getbaz() { return baz; }
 #include <string.h>
 #include <unistd.h>
 
-#include "objAccess.h"
-#include "ia32abi.h"
+#include "sqSetjmpShim.h"
 
-#include <setjmp.h>
+#include "objAccess.h"
+#include "vmCallback.h"
+#include "sqAssert.h"
+#include "ia32abi.h"
 
 #if !defined(min)
 # define min(a,b) ((a) < (b) ? (a) : (b))
@@ -219,7 +221,7 @@ thunkEntry(void *thunkp, sqIntptr_t *stackp)
 
 	case retint64: {
 		long vhigh = rs->rvs.valint64.high;
-#if _MSC_VER
+#if _MSC_VER && !__clang__
 				_asm mov edx, dword ptr vhigh;
 #elif __GNUC__
 #warning ASSEMBLER
@@ -232,7 +234,7 @@ thunkEntry(void *thunkp, sqIntptr_t *stackp)
 
 	case retdouble: {
 		double valflt64 = rs->rvs.valflt64;
-#if _MSC_VER
+#if _MSC_VER && !__clang__
 				_asm fld qword ptr valflt64;
 #elif __GNUC__
 #warning ASSEMBLER
