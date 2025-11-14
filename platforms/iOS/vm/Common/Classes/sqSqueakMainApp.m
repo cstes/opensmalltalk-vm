@@ -230,7 +230,7 @@ reportStackState(FILE *file, const char *msg, char *date, int printAll, ucontext
 	else
 		fprintf(file,"\nCan't dump Smalltalk stack(s). Not in VM or GUI thread\n");
 # if STACKVM
-	fprintf(file,"\nMost recent primitives\n");
+	fprintf(file,"\nMost recent primitives (oldest first)\n");
 	dumpPrimTraceLogOn(file);
 #	if COGVM
 	fprintf(file,"\n");
@@ -348,6 +348,13 @@ crashDumpFile()
  *
  */
 
+#if COGMTVM
+extern void dumpOwnerLogOnMax(FILE *aFile, sqInt maxElements);
+#else
+# define dumpOwnerLogOnMax(f,n) 0 // nada
+#endif
+#define NUMOLOGS 128
+
 static void
 sigusr1(int sig, siginfo_t *info, void *uap)
 {
@@ -364,7 +371,9 @@ sigusr1(int sig, siginfo_t *info, void *uap)
 	FILE *crashdump = crashDumpFile();
 	ctime_r(&now,ctimebuf);
 	reportStackState(crashdump,"SIGUSR1", ctimebuf, 1, uap);
+	dumpOwnerLogOnMax(crashdump,NUMOLOGS);
 	reportStackState(stdout,"SIGUSR1", ctimebuf, 1, uap);
+	dumpOwnerLogOnMax(stdout,NUMOLOGS);
 	fclose(crashdump);
 
 	errno = saved_errno;
@@ -400,7 +409,9 @@ sigsegv(int sig, siginfo_t *info, void *uap)
 		FILE *crashdump = crashDumpFile();
 		ctime_r(&now,ctimebuf);
 		reportStackState(crashdump,fault, ctimebuf, 0, uap);
+		dumpOwnerLogOnMax(crashdump,NUMOLOGS);
 		reportStackState(stderr,fault, ctimebuf, 0, uap);
+		dumpOwnerLogOnMax(stderr,NUMOLOGS);
 		fclose(crashdump);
 	}
 	if (blockOnError) block();
