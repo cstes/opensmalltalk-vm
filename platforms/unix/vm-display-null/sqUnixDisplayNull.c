@@ -20,9 +20,34 @@ static sqInt display_ioFormPrint(sqInt b, sqInt w, sqInt h, sqInt d, double hS, 
 
 static sqInt display_ioBeep(void) { return 0; }
 
+#define MAX_IDLE_USECS 500000  /* 500ms cap when no Delays pending */
+
 static sqInt display_ioRelinquishProcessorForMicroseconds(sqInt microSeconds)
 {
-  aioSleepForUsecs(microSeconds);
+  extern usqLong getNextWakeupUsecs(void);
+  extern volatile int mainThreadIsIdle;
+
+  usqLong nextWakeupUsecs = getNextWakeupUsecs();
+  usqLong utcNow = ioUTCMicroseconds();
+  long realTimeToWait;
+
+  if (nextWakeupUsecs != 0 && nextWakeupUsecs <= utcNow)
+    return 0;  /* Delay already overdue, don't sleep */
+
+  if (nextWakeupUsecs != 0) {
+    realTimeToWait = nextWakeupUsecs - utcNow;
+    if (realTimeToWait > MAX_IDLE_USECS)
+      realTimeToWait = MAX_IDLE_USECS;
+  } else {
+    realTimeToWait = MAX_IDLE_USECS;
+  }
+
+  mainThreadIsIdle = 1;
+  __sync_synchronize();
+  aioSleepForUsecs(realTimeToWait);
+  __sync_synchronize();
+  mainThreadIsIdle = 0;
+
   return 0;
 }
 
@@ -111,9 +136,9 @@ static sqInt display_clipboardSizeWithType(char *typeName, int nTypeName)
   return 0;
 }
 
-static void display_clipboardWriteWithType(char *data, size_t ndata, char *typeName, size_t nTypeName, int isDnd, int isClaiming)
+static sqInt display_clipboardWriteWithType(char *data, size_t ndata, char *typeName, size_t nTypeName, int isDnd, int isClaiming)
 {
-  return;
+  return 0;
 }
 
 static sqInt display_dndOutStart(char *types, int ntypes)	{ return 0; }
