@@ -146,10 +146,17 @@ updateMicrosecondClock()
 	 * course this will cause problems if the clock is manually adjusted.  To
 	 * which the doctor says, "don't do that".
 	 */
+#if DoNotAssertMonotonicUTCClock
+	if (newUtcMicrosecondClock < utcMicrosecondClock) {
+		logusecs(0); /* if logging log a backward step as 0 */
+		return;
+	}
+#else
 	if (!asserta(newUtcMicrosecondClock >= utcMicrosecondClock)) {
 		logusecs(0); /* if logging log a backward step as 0 */
 		return;
 	}
+#endif
 	newLocalMicrosecondClock = newUtcMicrosecondClock + vmGMTOffset;
 
 	set64(utcMicrosecondClock,newUtcMicrosecondClock);
@@ -296,20 +303,20 @@ kqRemoveHeartbeatTimer(void)
 }
 #endif /* USE_KQUEUE || __APPLE__ */
 
+extern usqLong getNextWakeupUsecs(void);
+#if !defined(min)
+# define min(a,b) ((a) < (b) ? (a) : (b))
+#endif
+
 /*
  * On Mac OS X use the following.
  * On Unix use dpy->ioRelinquishProcessorForMicroseconds
  */
 #if macintoshSqueak
-#if !defined(min)
-# define min(a,b) ((a) < (b) ? (a) : (b))
-#endif
 sqInt
 ioRelinquishProcessorForMicroseconds(sqInt microSeconds)
 {
-    usqLong	realTimeToWait;
-	extern usqLong getNextWakeupUsecs();
-	usqLong utcNow;
+    usqLong	realTimeToWait, utcNow;
 	usqLong nextWakeupUsecs = getNextWakeupUsecs();
 
 	updateMicrosecondClock();
@@ -331,7 +338,7 @@ ioRelinquishProcessorForMicroseconds(sqInt microSeconds)
 		kqRegisterHeartbeatTimer();
 #endif
 	/* If a delay is pending then don't set mainThreadIsIdle so that waits
-	 * will exit primptly and delays will fire promptly. Use this to test,
+	 * will exit promptly and delays will fire promptly. Use this to test,
 	 * each delay should take about 20 milliseconds.
 	 * (1 to: 3) collect:[:i|[(Delay forSeconds: 0.020) wait] timeToRun] #(22 20 20)
 	 */
@@ -448,12 +455,9 @@ beatStateMachine(void *careLess)
 			continue;
 		}
 #endif
-		/* Adaptive: use longer interval when main thread is idle
-		 * (fallback for non-kqueue or when kqueue timer not active). */
-		if (mainThreadIsIdle && !getNextWakeupUsecs())
-			naptime = idleBeatPeriod;
-		else
-			naptime = beatperiod;
+		/* Adaptive: use longer interval when main thread is idle & no active
+		 * delay. (fallback for non-kqueue or when kqueue timer not active). */
+		naptime = mainThreadIsIdle ? idleBeatPeriod : beatperiod;
 
 		while (nanosleep(&naptime, &naptime) == -1
 			&& naptime.tv_sec >= 0 /* oversleeps can return tv_sec < 0 */
